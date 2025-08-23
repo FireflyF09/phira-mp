@@ -440,6 +440,16 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                     }
                 }
                 room.send(Message::CreateRoom { user: user.id }).await;
+                user.try_send(ServerCommand::Message(Message::Chat {
+                    user: 1,
+                    content: "欢迎进入HSNPhira服务器！凌晨1：30服务器重启哦".to_string(),
+                }))
+                .await;
+                user.try_send(ServerCommand::Message(Message::Chat {
+                    user: 1,
+                    content: "想要查询房间？加入1049578201交流群即可查询！".to_string(),
+                }))
+                .await;
                 drop(map_guard);
                 *room_guard = Some(room);
 
@@ -456,7 +466,9 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                     bail!("already in room");
                 }
                 let room = user.server.rooms.read().await.get(&id).map(Arc::clone);
-                let Some(room) = room else { bail!("room not found") };
+                let Some(room) = room else {
+                    bail!("room not found")
+                };
                 if room.locked.load(Ordering::SeqCst) {
                     bail!(tl!("join-room-locked"));
                 }

@@ -13,7 +13,7 @@ use std::{
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 
-const ROOM_MAX_USERS: usize = 8;
+const ROOM_MAX_USERS: usize = 100;
 
 #[derive(Default, Debug)]
 pub enum InternalRoomState {
