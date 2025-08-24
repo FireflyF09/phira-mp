@@ -43,8 +43,10 @@ pub fn init_log(file: &str) -> Result<WorkerGuard> {
     use tracing::{metadata::LevelFilter, Level};
     use tracing_log::LogTracer;
     use tracing_subscriber::{filter, fmt, prelude::*, EnvFilter};
+    use std::env;
 
-    let log_dir = Path::new("log");
+    let log_dir_str = env::var("HSN_LOGDIR").unwrap_or("log".to_string());
+    let log_dir = Path::new(&log_dir_str);
     if log_dir.exists() {
         if !log_dir.is_dir() {
             panic!("log exists and is not a folder");
