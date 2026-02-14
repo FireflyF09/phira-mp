@@ -20,7 +20,7 @@ use std::{
     path::Path,
 };
 use tokio::{net::TcpListener, sync::RwLock};
-use tracing::warn;
+use tracing::{info, warn};
 use tracing_appender::non_blocking::WorkerGuard;
 use uuid::Uuid;
 
@@ -40,10 +40,10 @@ fn vacant_entry<V>(map: &mut HashMap<Uuid, V>) -> VacantEntry<'_, Uuid, V> {
 }
 
 pub fn init_log(file: &str) -> Result<WorkerGuard> {
+    use std::env;
     use tracing::{metadata::LevelFilter, Level};
     use tracing_log::LogTracer;
     use tracing_subscriber::{filter, fmt, prelude::*, EnvFilter};
-    use std::env;
 
     let log_dir_str = env::var("HSN_LOGDIR").unwrap_or("log".to_string());
     let log_dir = Path::new(&log_dir_str);

@@ -2,15 +2,15 @@ use crate::{
     l10n::{Language, LANGUAGE},
     tl, Chart, InternalRoomState, Record, Room, ServerState,
 };
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use phira_mp_common::{
     ClientCommand, JoinRoomResponse, Message, ServerCommand, Stream, UserInfo,
     HEARTBEAT_DISCONNECT_TIMEOUT,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{hash_map::Entry, HashSet},
-    ops::DerefMut,
+    ops::{Deref, DerefMut},
     sync::{
         atomic::{AtomicBool, AtomicU32, Ordering},
         Arc, Weak,
@@ -38,6 +38,7 @@ pub struct User {
     pub room: RwLock<Option<Arc<Room>>>,
 
     pub monitor: AtomicBool,
+    pub console: AtomicBool,
     pub game_time: AtomicU32,
 
     pub dangle_mark: Mutex<Option<Arc<()>>>,
@@ -55,6 +56,7 @@ impl User {
             room: RwLock::default(),
 
             monitor: AtomicBool::default(),
+            console: AtomicBool::default(),
             game_time: AtomicU32::default(),
 
             dangle_mark: Mutex::default(),
@@ -130,6 +132,47 @@ pub struct Session {
     monitor_task_handle: JoinHandle<()>,
 }
 
+#[derive(Debug, Deserialize)]
+struct AuthUserInfo {
+    pub id: i32,
+    pub name: String,
+    pub language: String,
+}
+
+async fn authenticate(id: Uuid, token: String) -> Result<AuthUserInfo> {
+    debug!("session {id}: authenticate {token}");
+    reqwest::Client::new()
+        .get(format!("{HOST}/me"))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {token}"))
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .with_context(|| "failed to fetch info")?
+        .json()
+        .await
+        .inspect_err(|e| warn!("failed to fetch info: {e:?}"))
+        .with_context(|| "failed to fetch info")
+
+    // let mut users_guard = server.users.write().await;
+    // if let Some(user) = users_guard.get(&resp.id) {
+    //     info!("reconnect");
+    //     let _ = tx.send(Arc::clone(user));
+    //     this_inited.notified().await;
+    //     user.set_session(Arc::downgrade(this.get().unwrap())).await;
+    // } else {
+    //     let user = Arc::new(User::new(
+    //         resp.id,
+    //         resp.name,
+    //         resp.language.parse().map(Language).unwrap_or_default(),
+    //         Arc::clone(&server),
+    //     ));
+    //     let _ = tx.send(Arc::clone(&user));
+    //     this_inited.notified().await;
+    //     user.set_session(Arc::downgrade(this.get().unwrap())).await;
+    //     users_guard.insert(resp.id, user);
+    // }
+}
+
 impl Session {
     pub async fn new(id: Uuid, stream: TcpStream, server: Arc<ServerState>) -> Result<Arc<Self>> {
         stream.set_nodelay(true)?;
@@ -141,6 +184,7 @@ impl Session {
             None,
             stream,
             Box::new({
+                let id = id.clone();
                 let this = Arc::clone(&this);
                 let this_inited = Arc::clone(&this_inited);
                 let mut tx = Some(tx);
@@ -167,41 +211,10 @@ impl Session {
                         }
                         if waiting_for_authenticate.load(Ordering::SeqCst) {
                             if let ClientCommand::Authenticate { token } = cmd {
+                                // normal game client
                                 let Some(tx) = tx else { return };
-                                let res: Result<()> = {
-                                    let this = Arc::clone(&this);
-                                    let server = Arc::clone(&server);
-                                    async move {
-                                        let token = token.into_inner();
-                                        debug!("session {id}: authenticate {token}");
-                                        #[derive(Debug, Deserialize)]
-                                        struct UserInfo {
-                                            id: i32,
-                                            name: String,
-                                            language: String,
-                                        }
-                                        let resp: Result<UserInfo> = async {
-                                            Ok(reqwest::Client::new()
-                                                .get(format!("{HOST}/me"))
-                                                .header(
-                                                    reqwest::header::AUTHORIZATION,
-                                                    format!("Bearer {token}"),
-                                                )
-                                                .send()
-                                                .await?
-                                                .error_for_status()?
-                                                .json()
-                                                .await?)
-                                        }
-                                        .await;
-                                        let resp = match resp {
-                                            Ok(resp) => resp,
-                                            Err(err) => {
-                                                warn!("failed to fetch info: {err:?}");
-                                                bail!("failed to fetch info");
-                                            }
-                                        };
-                                        debug!("session {id} <- {resp:?}");
+                                match authenticate(id.clone(), token.into_inner()).await {
+                                    Ok(resp) => {
                                         let mut users_guard = server.users.write().await;
                                         if let Some(user) = users_guard.get(&resp.id) {
                                             info!("reconnect");
@@ -225,38 +238,82 @@ impl Session {
                                                 .await;
                                             users_guard.insert(resp.id, user);
                                         }
-                                        Ok(())
+
+                                        let user = &this.get().unwrap().user;
+                                        let room_state = match user.room.read().await.as_ref() {
+                                            Some(room) => Some(room.client_state(user).await),
+                                            None => None,
+                                        };
+                                        let _ = send_tx
+                                            .send(ServerCommand::Authenticate(Ok((
+                                                user.to_info(),
+                                                room_state,
+                                            ))))
+                                            .await;
+                                        waiting_for_authenticate.store(false, Ordering::SeqCst);
+                                    }
+                                    Err(err) => {
+                                        warn!("failed to authenticate: {err:?}");
+                                        let _ = send_tx
+                                            .send(ServerCommand::Authenticate(Err(err.to_string())))
+                                            .await;
+                                        panicked.store(true, Ordering::SeqCst);
+                                        if let Err(err) = server.lost_con_tx.send(id).await {
+                                            error!(
+                                                "failed to mark lost connection ({id}): {err:?}"
+                                            );
+                                        }
                                     }
                                 }
-                                .await;
-                                if let Err(err) = res {
-                                    warn!("failed to authenticate: {err:?}");
-                                    let _ = send_tx
-                                        .send(ServerCommand::Authenticate(Err(err.to_string())))
-                                        .await;
-                                    panicked.store(true, Ordering::SeqCst);
-                                    if let Err(err) = server.lost_con_tx.send(id).await {
-                                        error!("failed to mark lost connection ({id}): {err:?}");
+                            } else if let ClientCommand::ConsoleAuthenticate { token } = cmd {
+                                // a server console client
+                                let Some(tx) = tx else { return };
+                                match authenticate(id.clone(), token.into_inner()).await {
+                                    Ok(resp) => {
+                                        let user = Arc::new(User::new(
+                                            resp.id,
+                                            resp.name,
+                                            resp.language.parse().map(Language).unwrap_or_default(),
+                                            Arc::clone(&server),
+                                        ));
+                                        let _ = tx.send(Arc::clone(&user));
+                                        this_inited.notified().await;
+                                        user.set_session(Arc::downgrade(this.get().unwrap())).await;
+
+                                        let _ = send_tx
+                                            .send(ServerCommand::Authenticate(Ok((
+                                                user.to_info(),
+                                                None,
+                                            ))))
+                                            .await;
+                                        waiting_for_authenticate.store(false, Ordering::SeqCst);
                                     }
-                                } else {
-                                    let user = &this.get().unwrap().user;
-                                    let room_state = match user.room.read().await.as_ref() {
-                                        Some(room) => Some(room.client_state(user).await),
-                                        None => None,
-                                    };
-                                    let _ = send_tx
-                                        .send(ServerCommand::Authenticate(Ok((
-                                            user.to_info(),
-                                            room_state,
-                                        ))))
-                                        .await;
-                                    waiting_for_authenticate.store(false, Ordering::SeqCst);
+                                    Err(err) => {
+                                        warn!("failed to authenticate: {err:?}");
+                                        let _ = send_tx
+                                            .send(ServerCommand::Authenticate(Err(err.to_string())))
+                                            .await;
+                                        panicked.store(true, Ordering::SeqCst);
+                                        if let Err(err) = server.lost_con_tx.send(id).await {
+                                            error!(
+                                                "failed to mark lost connection ({id}): {err:?}"
+                                            );
+                                        }
+                                    }
                                 }
-                                return;
+                            } else if matches!(cmd, ClientCommand::QueryRooms) {
+                                // query rooms list, no auth required
+                                let rooms = get_rooms_list(&server).await;
+                                let _ = send_tx.send(ServerCommand::ResponseRooms(rooms)).await;
+                                // one-shot connection, disconnect
+                                panicked.store(true, Ordering::SeqCst);
+                                if let Err(err) = server.lost_con_tx.send(id).await {
+                                    error!("failed to mark lost connection ({id}): {err:?}");
+                                }
                             } else {
                                 warn!("packet before authentication, ignoring: {cmd:?}");
-                                return;
                             }
+                            return;
                         }
                         let user = this.get().map(|it| Arc::clone(&it.user)).unwrap();
                         if let Some(resp) = LANGUAGE
@@ -332,6 +389,42 @@ impl Drop for Session {
     }
 }
 
+async fn get_rooms_list(server: &ServerState) -> String {
+    #[derive(Serialize)]
+    struct RoomData {
+        host: i32,
+        users: Vec<i32>,
+        lock: bool,
+        cycle: bool,
+        chart: Option<i32>,
+        state: &'static str,
+    }
+    #[derive(Serialize)]
+    struct RoomInfo {
+        name: String,
+        data: RoomData,
+    }
+    let mut rooms = Vec::new();
+    for (id, room) in server.rooms.read().await.iter() {
+        rooms.push(RoomInfo {
+            name: id.to_string(),
+            data: RoomData {
+                host: room.host.read().await.upgrade().map_or(-1, |x| x.id),
+                users: room.users().await.iter().map(|x| x.id).collect(),
+                lock: room.is_locked(),
+                cycle: room.is_cycle(),
+                chart: room.chart.read().await.as_ref().map(|x| x.id),
+                state: match room.state.read().await.deref() {
+                    InternalRoomState::Playing { .. } => "PLAYING",
+                    InternalRoomState::SelectChart => "SELECTING_CHART",
+                    InternalRoomState::WaitForReady { .. } => "WAITING_FOR_READY",
+                },
+            },
+        });
+    }
+    serde_json::to_string(&rooms).unwrap()
+}
+
 async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
     #[inline]
     fn err_to_str<T>(result: Result<T>) -> Result<T, String> {
@@ -372,9 +465,9 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
     }
     match cmd {
         ClientCommand::Ping => unreachable!(),
-        ClientCommand::Authenticate { .. } => Some(ServerCommand::Authenticate(Err(
-            "repeated authenticate".to_owned(),
-        ))),
+        ClientCommand::Authenticate { .. } | ClientCommand::ConsoleAuthenticate { .. } => Some(
+            ServerCommand::Authenticate(Err("repeated authenticate".to_owned())),
+        ),
         ClientCommand::Chat { message } => {
             let res: Result<()> = async move {
                 get_room!(room);
@@ -718,5 +811,8 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
             .await;
             Some(ServerCommand::Abort(err_to_str(res)))
         }
+        ClientCommand::QueryRooms => Some(ServerCommand::ResponseRooms(
+            get_rooms_list(&user.server).await,
+        )),
     }
 }

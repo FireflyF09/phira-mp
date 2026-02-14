@@ -154,9 +154,11 @@ pub struct JudgeEvent {
 }
 
 #[derive(Debug, BinaryData)]
+#[repr(u8)]
 pub enum ClientCommand {
     Ping,
 
+    // Commands for game clients
     Authenticate { token: Varchar<32> },
     Chat { message: Varchar<200> },
 
@@ -175,6 +177,10 @@ pub enum ClientCommand {
     CancelReady,
     Played { id: i32 },
     Abort,
+
+    // Command for server console clients
+    ConsoleAuthenticate { token: Varchar<32> },
+    QueryRooms,
 }
 
 #[derive(Clone, Debug, BinaryData)]
@@ -276,6 +282,7 @@ pub struct JoinRoomResponse {
 pub enum ServerCommand {
     Pong,
 
+    // Commands for game clients
     Authenticate(SResult<(UserInfo, Option<ClientRoomState>)>),
     Chat(SResult<()>),
 
@@ -305,4 +312,7 @@ pub enum ServerCommand {
     CancelReady(SResult<()>),
     Played(SResult<()>),
     Abort(SResult<()>),
+
+    // command for console clients
+    ResponseRooms(String),
 }
