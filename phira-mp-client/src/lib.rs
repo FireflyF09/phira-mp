@@ -506,5 +506,8 @@ async fn process(state: Arc<State>, cmd: ServerCommand) {
         ServerCommand::Abort(res) => {
             cb(&state.cb_abort, res).await;
         }
+        _ => {
+            warn!("Unexpected command: {cmd:?}")
+        }
     }
 }

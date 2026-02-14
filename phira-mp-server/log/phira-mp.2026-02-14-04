@@ -1,0 +1,80 @@
+[2m2026-02-14T04:37:42.734568Z[0m [34mDEBUG[0m [2mphira_mp_server::session[0m[2m:[0m session 3fa5810c-9c58-4704-9d6f-626ef03df750: authenticate YKXxLuly1NTSWfF0VV3YrEINyWrL92bL
+[2m2026-02-14T04:37:42.749913Z[0m [34mDEBUG[0m [2mlog[0m[2m:[0m starting new connection: https://phira.5wyxi.com/    
+[2m2026-02-14T04:37:42.981045Z[0m [33m WARN[0m [2mphira_mp_server::session[0m[2m:[0m failed to authenticate: failed to fetch info
+
+Caused by:
+    HTTP status client error (400 Bad Request) for url (https://phira.5wyxi.com/me)
+[2m2026-02-14T04:37:42.981092Z[0m [33m WARN[0m [2mphira_mp_server::server[0m[2m:[0m lost connection with 3fa5810c-9c58-4704-9d6f-626ef03df750
+[2m2026-02-14T04:37:42.981237Z[0m [33m WARN[0m [2mphira_mp_server[0m[2m:[0m failed to accept: channel closed
+[2m2026-02-14T04:37:46.059286Z[0m [34mDEBUG[0m [2mphira_mp_server::session[0m[2m:[0m session 4394c682-c9ca-440f-8596-af66fa2150a1: authenticate YKXxLuly1NTSWfF0VV3YrEINyWrL92bL
+[2m2026-02-14T04:37:46.073345Z[0m [34mDEBUG[0m [2mlog[0m[2m:[0m starting new connection: https://phira.5wyxi.com/    
+[2m2026-02-14T04:37:46.265884Z[0m [33m WARN[0m [2mphira_mp_server::session[0m[2m:[0m failed to authenticate: failed to fetch info
+
+Caused by:
+    HTTP status client error (400 Bad Request) for url (https://phira.5wyxi.com/me)
+[2m2026-02-14T04:37:46.265920Z[0m [33m WARN[0m [2mphira_mp_server::server[0m[2m:[0m lost connection with 4394c682-c9ca-440f-8596-af66fa2150a1
+[2m2026-02-14T04:37:46.266097Z[0m [33m WARN[0m [2mphira_mp_server[0m[2m:[0m failed to accept: channel closed
+[2m2026-02-14T04:37:52.735924Z[0m [33m WARN[0m [2mphira_mp_server::server[0m[2m:[0m lost connection with 3fa5810c-9c58-4704-9d6f-626ef03df750
+[2m2026-02-14T04:37:56.060067Z[0m [33m WARN[0m [2mphira_mp_server::server[0m[2m:[0m lost connection with 4394c682-c9ca-440f-8596-af66fa2150a1
+[2m2026-02-14T04:41:37.025668Z[0m [34mDEBUG[0m [2mphira_mp_server::session[0m[2m:[0m session 6c04fb3d-b573-4fe3-9fe4-67c75d790a44: authenticate YKXxLuly1NTSWfF0VV3YrEINyWrL92bL
+[2m2026-02-14T04:41:37.057408Z[0m [34mDEBUG[0m [2mlog[0m[2m:[0m starting new connection: https://phira.5wyxi.com/    
+[2m2026-02-14T04:41:37.263001Z[0m [33m WARN[0m [2mphira_mp_server::session[0m[2m:[0m failed to authenticate: failed to fetch info
+
+Caused by:
+    HTTP status client error (400 Bad Request) for url (https://phira.5wyxi.com/me)
+[2m2026-02-14T04:41:37.263051Z[0m [33m WARN[0m [2mphira_mp_server::server[0m[2m:[0m lost connection with 6c04fb3d-b573-4fe3-9fe4-67c75d790a44
+[2m2026-02-14T04:41:37.263229Z[0m [33m WARN[0m [2mphira_mp_server[0m[2m:[0m failed to accept: channel closed
+[2m2026-02-14T04:41:47.026546Z[0m [33m WARN[0m [2mphira_mp_server::server[0m[2m:[0m lost connection with 6c04fb3d-b573-4fe3-9fe4-67c75d790a44
+[2m2026-02-14T04:45:09.899129Z[0m [34mDEBUG[0m [2mphira_mp_server::session[0m[2m:[0m session c763fe2a-e846-4741-bdb4-d81a873086e9: authenticate YKXxLuly1NTSWfF0VV3YrEINyWrL92bL
+[2m2026-02-14T04:45:09.914699Z[0m [34mDEBUG[0m [2mlog[0m[2m:[0m starting new connection: https://phira.5wyxi.com/    
+[2m2026-02-14T04:45:10.106677Z[0m [33m WARN[0m [2mphira_mp_server::session[0m[2m:[0m failed to authenticate: failed to fetch info
+
+Caused by:
+    HTTP status client error (400 Bad Request) for url (https://phira.5wyxi.com/me)
+[2m2026-02-14T04:45:10.106770Z[0m [33m WARN[0m [2mphira_mp_server::server[0m[2m:[0m lost connection with c763fe2a-e846-4741-bdb4-d81a873086e9
+[2m2026-02-14T04:45:10.106879Z[0m [33m WARN[0m [2mphira_mp_server[0m[2m:[0m failed to accept: channel closed
+[2m2026-02-14T04:45:19.900621Z[0m [33m WARN[0m [2mphira_mp_server::server[0m[2m:[0m lost connection with c763fe2a-e846-4741-bdb4-d81a873086e9
+[2m2026-02-14T04:45:49.425903Z[0m [34mDEBUG[0m [2mphira_mp_server::session[0m[2m:[0m session 25f8ea3b-11cb-4e44-af67-6fe093f1fa0f: authenticate YKXxLuly1NTSWfF0VV3YrEINyWrL92bL
+[2m2026-02-14T04:45:49.460368Z[0m [34mDEBUG[0m [2mlog[0m[2m:[0m starting new connection: https://phira.5wyxi.com/    
+[2m2026-02-14T04:45:49.683268Z[0m [33m WARN[0m [2mphira_mp_server::session[0m[2m:[0m failed to authenticate: failed to fetch info
+
+Caused by:
+    HTTP status client error (400 Bad Request) for url (https://phira.5wyxi.com/me)
+[2m2026-02-14T04:45:49.683319Z[0m [33m WARN[0m [2mphira_mp_server::server[0m[2m:[0m lost connection with 25f8ea3b-11cb-4e44-af67-6fe093f1fa0f
+[2m2026-02-14T04:45:49.683439Z[0m [33m WARN[0m [2mphira_mp_server[0m[2m:[0m failed to accept: channel closed
+[2m2026-02-14T04:45:52.088604Z[0m [34mDEBUG[0m [2mphira_mp_server::session[0m[2m:[0m session e0754e07-b00b-4233-8c02-047c92ef554d: authenticate YKXxLuly1NTSWfF0VV3YrEINyWrL92bL
+[2m2026-02-14T04:45:52.102529Z[0m [34mDEBUG[0m [2mlog[0m[2m:[0m starting new connection: https://phira.5wyxi.com/    
+[2m2026-02-14T04:45:52.308035Z[0m [33m WARN[0m [2mphira_mp_server::session[0m[2m:[0m failed to authenticate: failed to fetch info
+
+Caused by:
+    HTTP status client error (400 Bad Request) for url (https://phira.5wyxi.com/me)
+[2m2026-02-14T04:45:52.308107Z[0m [33m WARN[0m [2mphira_mp_server::server[0m[2m:[0m lost connection with e0754e07-b00b-4233-8c02-047c92ef554d
+[2m2026-02-14T04:45:52.308263Z[0m [33m WARN[0m [2mphira_mp_server[0m[2m:[0m failed to accept: channel closed
+[2m2026-02-14T04:45:59.427030Z[0m [33m WARN[0m [2mphira_mp_server::server[0m[2m:[0m lost connection with 25f8ea3b-11cb-4e44-af67-6fe093f1fa0f
+[2m2026-02-14T04:46:02.089678Z[0m [33m WARN[0m [2mphira_mp_server::server[0m[2m:[0m lost connection with e0754e07-b00b-4233-8c02-047c92ef554d
+[2m2026-02-14T04:46:32.785119Z[0m [34mDEBUG[0m [2mphira_mp_server::session[0m[2m:[0m session bb6e9ebe-8d6a-4047-ae61-10a247855ae9: authenticate TZNWQaIt0ULx8voChoyp
+[2m2026-02-14T04:46:32.816561Z[0m [34mDEBUG[0m [2mlog[0m[2m:[0m starting new connection: https://phira.5wyxi.com/    
+[2m2026-02-14T04:46:32.994789Z[0m [32m INFO[0m [2mphira_mp_server::server[0m[2m:[0m received connections from [::ffff:172.20.10.4]:60266 (bb6e9ebe-8d6a-4047-ae61-10a247855ae9), version: 1
+[2m2026-02-14T04:46:32.994837Z[0m [32m INFO[0m [2mphira_mp_server[0m[2m:[0m new connection
+[2m2026-02-14T04:46:38.872020Z[0m [34mDEBUG[0m [2mphira_mp_server::room[0m[2m:[0m broadcast Message(CreateRoom { user: 717448 })
+[2m2026-02-14T04:46:38.872079Z[0m [32m INFO[0m [2mphira_mp_server::session[0m[2m:[0m user create room [3muser[0m[2m=[0m717448 [3mroom[0m[2m=[0m"1a1"
+[2m2026-02-14T04:46:46.450676Z[0m [32m INFO[0m [2mphira_mp_server::session[0m[2m:[0m user leave room [3muser[0m[2m=[0m717448 [3mroom[0m[2m=[0m"1a1"
+[2m2026-02-14T04:46:46.450723Z[0m [34mDEBUG[0m [2mphira_mp_server::room[0m[2m:[0m broadcast Message(LeaveRoom { user: 717448, name: "ExplodingKonjac" })
+[2m2026-02-14T04:46:46.450769Z[0m [32m INFO[0m [2mphira_mp_server::room[0m[2m:[0m host disconnected!
+[2m2026-02-14T04:46:46.450774Z[0m [32m INFO[0m [2mphira_mp_server::room[0m[2m:[0m room users all disconnected, dropping room
+[2m2026-02-14T04:46:56.451997Z[0m [33m WARN[0m [2mphira_mp_server::server[0m[2m:[0m lost connection with bb6e9ebe-8d6a-4047-ae61-10a247855ae9
+[2m2026-02-14T04:46:56.452044Z[0m [33m WARN[0m [2mphira_mp_server::session[0m[2m:[0m user dangling [3muser[0m[2m=[0m717448
+[2m2026-02-14T04:47:39.666660Z[0m [34mDEBUG[0m [2mphira_mp_server::session[0m[2m:[0m session cf2fa224-e5ee-416f-bb2c-a5cf0730593a: authenticate TZNWQaIt0ULx8voChoyp
+[2m2026-02-14T04:47:39.701455Z[0m [34mDEBUG[0m [2mlog[0m[2m:[0m starting new connection: https://phira.5wyxi.com/    
+[2m2026-02-14T04:47:39.881112Z[0m [32m INFO[0m [2mphira_mp_server::server[0m[2m:[0m received connections from [::ffff:172.20.10.4]:60268 (cf2fa224-e5ee-416f-bb2c-a5cf0730593a), version: 1
+[2m2026-02-14T04:47:47.890576Z[0m [34mDEBUG[0m [2mphira_mp_server::room[0m[2m:[0m broadcast Message(CreateRoom { user: 717448 })
+[2m2026-02-14T04:47:47.890641Z[0m [32m INFO[0m [2mphira_mp_server::session[0m[2m:[0m user create room [3muser[0m[2m=[0m717448 [3mroom[0m[2m=[0m"123"
+[2m2026-02-14T04:49:04.497814Z[0m [34mDEBUG[0m [2mphira_mp_server::session[0m[2m:[0m session 33b17bf8-c7ce-4689-80c7-497808479f90: authenticate TZNWQaIt0ULx8voChoyp
+[2m2026-02-14T04:49:04.513210Z[0m [34mDEBUG[0m [2mlog[0m[2m:[0m starting new connection: https://phira.5wyxi.com/    
+[2m2026-02-14T04:49:04.721115Z[0m [32m INFO[0m [2mphira_mp_server::server[0m[2m:[0m received connections from [::ffff:172.20.10.4]:60269 (33b17bf8-c7ce-4689-80c7-497808479f90), version: 1
+[2m2026-02-14T04:49:13.600261Z[0m [34mDEBUG[0m [2mphira_mp_server::room[0m[2m:[0m broadcast Message(CreateRoom { user: 717448 })
+[2m2026-02-14T04:49:13.600335Z[0m [32m INFO[0m [2mphira_mp_server::session[0m[2m:[0m user create room [3muser[0m[2m=[0m717448 [3mroom[0m[2m=[0m"12e"
+[2m2026-02-14T04:49:24.965821Z[0m [32m INFO[0m [2mphira_mp_server::session[0m[2m:[0m user leave room [3muser[0m[2m=[0m717448 [3mroom[0m[2m=[0m"12e"
+[2m2026-02-14T04:49:24.965910Z[0m [34mDEBUG[0m [2mphira_mp_server::room[0m[2m:[0m broadcast Message(LeaveRoom { user: 717448, name: "ExplodingKonjac" })
+[2m2026-02-14T04:49:24.965977Z[0m [32m INFO[0m [2mphira_mp_server::room[0m[2m:[0m host disconnected!
+[2m2026-02-14T04:49:24.965992Z[0m [32m INFO[0m [2mphira_mp_server::room[0m[2m:[0m room users all disconnected, dropping room
