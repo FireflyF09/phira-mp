@@ -14,7 +14,7 @@ jobs:
         arch: [amd64, arm64, armhf]
         include:
           - arch: amd64
-            triplet: amd64-linux-gnu
+            triplet: x86-64-linux-gnu
             compiler: g++
           - arch: arm64
             triplet: aarch64-linux-gnu
