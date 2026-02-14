@@ -4,7 +4,7 @@ use crate::{
 };
 use anyhow::{anyhow, bail, Context, Result};
 use phira_mp_common::{
-    ClientCommand, JoinRoomResponse, Message, ServerCommand, Stream, UserInfo,
+    ClientCommand, JoinRoomResponse, Message, RoomId, ServerCommand, Stream, UserInfo,
     HEARTBEAT_DISCONNECT_TIMEOUT,
 };
 use serde::{Deserialize, Serialize};
@@ -178,7 +178,7 @@ impl Session {
         stream.set_nodelay(true)?;
         let this = Arc::new(OnceCell::<Arc<Session>>::new());
         let this_inited = Arc::new(Notify::new());
-        let (tx, rx) = oneshot::channel::<Arc<User>>();
+        let (tx, rx) = oneshot::channel::<Option<Arc<User>>>();
         let last_recv: Arc<Mutex<Instant>> = Arc::new(Mutex::new(Instant::now()));
         let stream = Stream::<ServerCommand, ClientCommand>::new(
             None,
@@ -218,7 +218,7 @@ impl Session {
                                         let mut users_guard = server.users.write().await;
                                         if let Some(user) = users_guard.get(&resp.id) {
                                             info!("reconnect");
-                                            let _ = tx.send(Arc::clone(user));
+                                            let _ = tx.send(Some(Arc::clone(user)));
                                             this_inited.notified().await;
                                             user.set_session(Arc::downgrade(this.get().unwrap()))
                                                 .await;
@@ -232,7 +232,7 @@ impl Session {
                                                     .unwrap_or_default(),
                                                 Arc::clone(&server),
                                             ));
-                                            let _ = tx.send(Arc::clone(&user));
+                                            let _ = tx.send(Some(Arc::clone(&user)));
                                             this_inited.notified().await;
                                             user.set_session(Arc::downgrade(this.get().unwrap()))
                                                 .await;
@@ -276,7 +276,7 @@ impl Session {
                                             resp.language.parse().map(Language).unwrap_or_default(),
                                             Arc::clone(&server),
                                         ));
-                                        let _ = tx.send(Arc::clone(&user));
+                                        let _ = tx.send(Some(Arc::clone(&user)));
                                         this_inited.notified().await;
                                         user.set_session(Arc::downgrade(this.get().unwrap())).await;
 
@@ -301,9 +301,12 @@ impl Session {
                                         }
                                     }
                                 }
-                            } else if matches!(cmd, ClientCommand::QueryRooms) {
+                            } else if let ClientCommand::QueryRooms { id: room_id } = cmd {
                                 // query rooms list, no auth required
-                                let rooms = get_rooms_list(&server).await;
+                                let Some(tx) = tx else { return };
+
+                                let rooms = query_rooms(&server, room_id).await;
+                                let _ = tx.send(None);
                                 let _ = send_tx.send(ServerCommand::ResponseRooms(rooms)).await;
                                 // one-shot connection, disconnect
                                 panicked.store(true, Ordering::SeqCst);
@@ -336,6 +339,7 @@ impl Session {
         )
         .await?;
         let monitor_task_handle = tokio::spawn({
+            let server = Arc::clone(&server);
             let last_recv = Arc::clone(&last_recv);
             async move {
                 loop {
@@ -354,13 +358,18 @@ impl Session {
             }
         });
 
-        let user = rx.await?;
-
+        let user = rx.await?.unwrap_or_else(|| {
+            Arc::new(User::new(
+                -1,
+                "no_user".into(),
+                Language::default(),
+                Arc::clone(&server),
+            ))
+        });
         let res = Arc::new(Self {
             id,
             stream,
             user,
-
             monitor_task_handle,
         });
         let _ = this.set(Arc::clone(&res));
@@ -389,7 +398,7 @@ impl Drop for Session {
     }
 }
 
-async fn get_rooms_list(server: &ServerState) -> String {
+async fn query_rooms(server: &ServerState, id: Option<RoomId>) -> String {
     #[derive(Serialize)]
     struct RoomData {
         host: i32,
@@ -404,25 +413,37 @@ async fn get_rooms_list(server: &ServerState) -> String {
         name: String,
         data: RoomData,
     }
-    let mut rooms = Vec::new();
-    for (id, room) in server.rooms.read().await.iter() {
-        rooms.push(RoomInfo {
-            name: id.to_string(),
-            data: RoomData {
-                host: room.host.read().await.upgrade().map_or(-1, |x| x.id),
-                users: room.users().await.iter().map(|x| x.id).collect(),
-                lock: room.is_locked(),
-                cycle: room.is_cycle(),
-                chart: room.chart.read().await.as_ref().map(|x| x.id),
-                state: match room.state.read().await.deref() {
-                    InternalRoomState::Playing { .. } => "PLAYING",
-                    InternalRoomState::SelectChart => "SELECTING_CHART",
-                    InternalRoomState::WaitForReady { .. } => "WAITING_FOR_READY",
-                },
+    async fn to_data(room: &Room) -> RoomData {
+        RoomData {
+            host: room.host.read().await.upgrade().map_or(-1, |x| x.id),
+            users: room.users().await.iter().map(|x| x.id).collect(),
+            lock: room.is_locked(),
+            cycle: room.is_cycle(),
+            chart: room.chart.read().await.as_ref().map(|x| x.id),
+            state: match room.state.read().await.deref() {
+                InternalRoomState::Playing { .. } => "PLAYING",
+                InternalRoomState::SelectChart => "SELECTING_CHART",
+                InternalRoomState::WaitForReady { .. } => "WAITING_FOR_READY",
             },
-        });
+        }
     }
-    serde_json::to_string(&rooms).unwrap()
+
+    if let Some(id) = id {
+        let room = match server.rooms.read().await.get(&id) {
+            Some(r) => Some(to_data(r.as_ref()).await),
+            None => None,
+        };
+        serde_json::to_string(&room).unwrap()
+    } else {
+        let mut rooms = Vec::new();
+        for (id, room) in server.rooms.read().await.iter() {
+            rooms.push(RoomInfo {
+                name: id.to_string(),
+                data: to_data(room.as_ref()).await,
+            });
+        }
+        serde_json::to_string(&rooms).unwrap()
+    }
 }
 
 async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
@@ -811,8 +832,8 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
             .await;
             Some(ServerCommand::Abort(err_to_str(res)))
         }
-        ClientCommand::QueryRooms => Some(ServerCommand::ResponseRooms(
-            get_rooms_list(&user.server).await,
+        ClientCommand::QueryRooms { id } => Some(ServerCommand::ResponseRooms(
+            query_rooms(&user.server, id).await,
         )),
     }
 }

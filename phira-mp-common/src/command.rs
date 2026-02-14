@@ -180,7 +180,7 @@ pub enum ClientCommand {
 
     // Command for server console clients
     ConsoleAuthenticate { token: Varchar<32> },
-    QueryRooms,
+    QueryRooms { id: Option<RoomId> },
 }
 
 #[derive(Clone, Debug, BinaryData)]

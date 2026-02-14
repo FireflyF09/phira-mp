@@ -20,7 +20,7 @@ use std::{
     path::Path,
 };
 use tokio::{net::TcpListener, sync::RwLock};
-use tracing::{info, warn};
+use tracing::warn;
 use tracing_appender::non_blocking::WorkerGuard;
 use uuid::Uuid;
 
