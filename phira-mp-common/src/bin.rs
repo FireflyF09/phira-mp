@@ -1,8 +1,13 @@
-use std::{collections::HashMap, hash::Hash};
+use std::{
+    collections::{HashMap, HashSet},
+    hash::Hash,
+    str::FromStr,
+};
 
 use anyhow::{anyhow, Result};
 use byteorder::{ByteOrder, LittleEndian as LE};
 use chrono::{DateTime, TimeZone, Utc};
+use serde_json::{Number, Value};
 use tap::TapFallible;
 use uuid::Uuid;
 
@@ -324,5 +329,57 @@ impl BinaryData for DateTime<Utc> {
 
     fn write_binary(&self, w: &mut BinaryWriter<'_>) -> Result<()> {
         w.write_val(self.timestamp_millis())
+    }
+}
+
+impl BinaryData for Value {
+    fn read_binary(r: &mut BinaryReader<'_>) -> Result<Self> {
+        match u8::read_binary(r)? {
+            0 => Ok(Value::Null),
+            1 => Ok(Value::Bool(bool::read_binary(r)?)),
+            2 => Ok(Value::Number(Number::from_str(&String::read_binary(r)?)?)),
+            3 => Ok(Value::String(String::read_binary(r)?)),
+            4 => Ok(Value::Array(BinaryData::read_binary(r)?)),
+            5 => {
+                let size = r.uleb()?;
+                let mut map = serde_json::Map::new();
+                for _ in 0..size {
+                    map.insert(String::read_binary(r)?, Value::read_binary(r)?);
+                }
+                Ok(Value::Object(map))
+            }
+            _ => Err(anyhow!("invalid json value type")),
+        }
+    }
+
+    fn write_binary(&self, w: &mut BinaryWriter<'_>) -> Result<()> {
+        match self {
+            Value::Null => u8::write_binary(&0, w)?,
+            Value::Bool(f) => {
+                u8::write_binary(&1, w)?;
+                f.write_binary(w)?;
+            }
+            Value::Number(n) => {
+                u8::write_binary(&2, w)?;
+                n.to_string().write_binary(w)?;
+            }
+            Value::String(n) => {
+                u8::write_binary(&3, w)?;
+                n.write_binary(w)?;
+            }
+            Value::Array(vec) => {
+                u8::write_binary(&4, w)?;
+                vec.write_binary(w)?;
+            }
+            Value::Object(map) => {
+                u8::write_binary(&5, w)?;
+                w.uleb(map.len() as u64)?;
+                for (k, v) in map.iter() {
+                    k.write_binary(w)?;
+                    v.write_binary(w)?;
+                }
+            }
+        };
+        Ok(())
     }
 }
