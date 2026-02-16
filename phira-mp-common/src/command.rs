@@ -183,9 +183,7 @@ pub enum ClientCommand {
     ConsoleAuthenticate { token: Varchar<32> },
     RoomMonitorAuthenticate { key: Vec<u8> },
 
-    QueryRoomList,
-    QueryRoomById { id: RoomId },
-    QueryRoomOfUser { id: i32 },
+    QueryRoomInfo,
 }
 
 #[derive(Clone, Debug, BinaryData)]
@@ -319,5 +317,29 @@ pub enum ServerCommand {
     Abort(SResult<()>),
 
     // command for console clients
-    RoomResponse(SResult<Value>),
+    RoomResponse(SResult<(HashMap<RoomId, Value>, HashMap<i32, RoomId>)>),
+
+    CreateRoomEvent {
+        room: RoomId,
+        data: Value,
+    },
+    UpdateRoomEvent {
+        room: RoomId,
+        data: Value,
+    },
+    JoinRoomEvent {
+        room: RoomId,
+        user: i32,
+    },
+    LeaveRoomEvent {
+        room: RoomId,
+        user: i32,
+    },
+    PlayerScore {
+        room: RoomId,
+        record: Value,
+    },
+    StartRound {
+        room: RoomId,
+    },
 }

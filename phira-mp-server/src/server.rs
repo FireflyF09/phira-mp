@@ -123,6 +123,15 @@ impl Server {
         entry.insert(session);
         Ok(())
     }
+
+    pub async fn get_room_monitor(&self) -> Option<Arc<Session>> {
+        self.state
+            .room_monitor
+            .read()
+            .await
+            .as_ref()
+            .and_then(|p| p.upgrade())
+    }
 }
 
 impl Drop for Server {
