@@ -757,6 +757,9 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                     room.check_all_ready().await;
 
                     if matches!(*room.state.read().await, InternalRoomState::Playing { .. }) {
+                        send_room_event!(ServerCommand::StartRoundEvent {
+                            room: room.id.clone()
+                        });
                         send_room_event!(ServerCommand::UpdateRoomEvent {
                             room: room.id.clone(),
                             data: json!({"state": "PLAYING"})
@@ -813,6 +816,10 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                     full_combo: res.full_combo,
                 })
                 .await;
+                send_room_event!(ServerCommand::PlayerScoreEvent {
+                    room: room.id.clone(),
+                    record: serde_json::to_value(&res).unwrap()
+                });
                 let mut guard = room.state.write().await;
                 if let InternalRoomState::Playing { results, aborted } = guard.deref_mut() {
                     if aborted.contains(&user.id) {

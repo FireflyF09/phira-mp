@@ -1,7 +1,7 @@
 use crate::{vacant_entry, IdMap, Room, SafeMap, Session, User};
 use anyhow::Result;
 use phira_mp_common::RoomId;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
     sync::{Arc, Weak},
@@ -30,7 +30,7 @@ impl Default for ServerConfig {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Record {
     pub id: i32,
     pub player: i32,
