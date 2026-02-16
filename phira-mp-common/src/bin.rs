@@ -1,8 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    hash::Hash,
-    str::FromStr,
-};
+use std::{collections::HashMap, hash::Hash, str::FromStr};
 
 use anyhow::{anyhow, Result};
 use byteorder::{ByteOrder, LittleEndian as LE};
@@ -208,6 +204,17 @@ impl BinaryData for f32 {
     }
 }
 
+impl BinaryData for f64 {
+    fn read_binary(r: &mut BinaryReader<'_>) -> Result<Self> {
+        Ok(LE::read_f64(r.take(8)?))
+    }
+
+    fn write_binary(&self, w: &mut BinaryWriter<'_>) -> Result<()> {
+        w.0.extend_from_slice(&self.to_le_bytes());
+        Ok(())
+    }
+}
+
 impl BinaryData for String {
     fn read_binary(r: &mut BinaryReader<'_>) -> Result<Self> {
         let len = r.uleb()? as usize;
@@ -332,12 +339,40 @@ impl BinaryData for DateTime<Utc> {
     }
 }
 
+impl BinaryData for Number {
+    fn read_binary(r: &mut BinaryReader<'_>) -> Result<Self> {
+        match u8::read_binary(r)? {
+            0 => Ok(Number::from(u64::read_binary(r)?)),
+            1 => Ok(Number::from(i64::read_binary(r)?)),
+            2 => Number::from_f64(f64::read_binary(r)?)
+                .ok_or_else(|| anyhow!("invalid f64 for json number (NaN or Inf)")),
+            _ => Err(anyhow!("invalid number type tag")),
+        }
+    }
+
+    fn write_binary(&self, w: &mut BinaryWriter<'_>) -> Result<()> {
+        if let Some(v) = self.as_u64() {
+            0u8.write_binary(w)?;
+            v.write_binary(w)?;
+        } else if let Some(v) = self.as_i64() {
+            1u8.write_binary(w)?;
+            v.write_binary(w)?;
+        } else if let Some(v) = self.as_f64() {
+            2u8.write_binary(w)?;
+            v.write_binary(w)?;
+        } else {
+            return Err(anyhow!("unrepresentable json number"));
+        }
+        Ok(())
+    }
+}
+
 impl BinaryData for Value {
     fn read_binary(r: &mut BinaryReader<'_>) -> Result<Self> {
         match u8::read_binary(r)? {
             0 => Ok(Value::Null),
             1 => Ok(Value::Bool(bool::read_binary(r)?)),
-            2 => Ok(Value::Number(Number::from_str(&String::read_binary(r)?)?)),
+            2 => Ok(Value::Number(Number::read_binary(r)?)),
             3 => Ok(Value::String(String::read_binary(r)?)),
             4 => Ok(Value::Array(BinaryData::read_binary(r)?)),
             5 => {
@@ -354,25 +389,25 @@ impl BinaryData for Value {
 
     fn write_binary(&self, w: &mut BinaryWriter<'_>) -> Result<()> {
         match self {
-            Value::Null => u8::write_binary(&0, w)?,
+            Value::Null => 0u8.write_binary(w)?,
             Value::Bool(f) => {
-                u8::write_binary(&1, w)?;
+                1u8.write_binary(w)?;
                 f.write_binary(w)?;
             }
             Value::Number(n) => {
-                u8::write_binary(&2, w)?;
-                n.to_string().write_binary(w)?;
+                2u8.write_binary(w)?;
+                n.write_binary(w)?;
             }
             Value::String(n) => {
-                u8::write_binary(&3, w)?;
+                3u8.write_binary(w)?;
                 n.write_binary(w)?;
             }
             Value::Array(vec) => {
-                u8::write_binary(&4, w)?;
+                4u8.write_binary(w)?;
                 vec.write_binary(w)?;
             }
             Value::Object(map) => {
-                u8::write_binary(&5, w)?;
+                5u8.write_binary(w)?;
                 w.uleb(map.len() as u64)?;
                 for (k, v) in map.iter() {
                     k.write_binary(w)?;
