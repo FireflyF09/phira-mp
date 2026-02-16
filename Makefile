@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -std=c++20 -Wall -Wextra -O2 -pthread -Iinclude
+CXXFLAGS = -std=c++20 -Wall -Wextra -O2 -pthread -Iinclude -static
 LDFLAGS = -pthread -luuid
 
 SRCDIR = src
