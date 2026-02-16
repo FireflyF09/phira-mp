@@ -2,7 +2,10 @@
 #include "room.h"
 #include "server.h"
 #include "http_client.h"
+#include "ban_manager.h"
+#include "web_server.h"
 #include <iostream>
+#include <sstream>
 #include <cstring>
 #include <algorithm>
 #include <sys/socket.h>
@@ -390,6 +393,13 @@ void Session::handle_authenticate(const std::string& token, std::shared_ptr<Serv
     std::cerr << "[session] " << id.str() << " <- id=" << user_id
               << " name=" << user_name << " lang=" << user_lang_str << std::endl;
 
+    // Check if user is banned
+    if (BanManager::instance().is_banned(user_id)) {
+        std::cerr << "[session] user " << user_id << " is banned" << std::endl;
+        try_send(ServerCommand::authenticate_err("你已被封禁，无法连接服务器。如有疑问请联系管理员，QQ群：1049578201"));
+        return;
+    }
+
     // Check if user already exists (reconnect)
     {
         std::unique_lock lock(server->users_mtx);
@@ -412,6 +422,37 @@ void Session::handle_authenticate(const std::string& token, std::shared_ptr<Serv
         room_state = rm->client_state(*user);
     }
     try_send(ServerCommand::authenticate_ok(user->to_info(), std::move(room_state)));
+
+    // Send welcome message with available rooms and QQ group
+    {
+        std::ostringstream welcome;
+        welcome << "欢迎来到 Phira 多人游戏服务器！\n";
+        welcome << "QQ群：1049578201\n";
+
+        // List available rooms (not Playing, not WaitingForReady)
+        std::vector<std::pair<std::string, int>> available_rooms;
+        {
+            std::shared_lock lock(server->rooms_mtx);
+            for (auto& [name, room] : server->rooms) {
+                std::shared_lock sl(room->state_mtx);
+                if (room->state.type == InternalRoomStateType::SelectChart && !room->is_locked()) {
+                    auto u = room->users();
+                    available_rooms.emplace_back(name, (int)u.size());
+                }
+            }
+        }
+
+        if (!available_rooms.empty()) {
+            welcome << "当前可加入的房间：\n";
+            for (auto& [name, count] : available_rooms) {
+                welcome << "  " << name << " (" << count << "/8)\n";
+            }
+        } else {
+            welcome << "当前暂无可加入的房间，你可以创建一个新房间。\n";
+        }
+
+        try_send(ServerCommand::msg(Message::chat(0, welcome.str())));
+    }
 }
 
 // ── Command processor (mirrors Rust's process function) ──────────────
@@ -485,6 +526,16 @@ void Session::process_command(const ClientCommand& cmd) {
         }
         std::cerr << "[session] user " << user->id << " create room " << rid.to_string() << std::endl;
         try_send(ServerCommand::simple_ok(ServerCommandType::CreateRoom));
+        // SSE: create_room
+        if (g_web_server) {
+            std::ostringstream oss;
+            oss << "{\"room\":\"" << rid.to_string() << "\",\"data\":{"
+                << "\"host\":" << user->id
+                << ",\"users\":[" << user->id << "]"
+                << ",\"lock\":false,\"cycle\":false,\"chart\":null"
+                << ",\"state\":\"SELECTING_CHART\",\"playing_users\":[],\"rounds\":[]}}";
+            g_web_server->broadcast_sse("create_room", oss.str());
+        }
         break;
     }
 
@@ -546,6 +597,11 @@ void Session::process_command(const ClientCommand& cmd) {
         for (auto& usr : m) jr.users.push_back(usr->to_info());
         jr.live = target_room->is_live();
         try_send(ServerCommand::join_room_ok(std::move(jr)));
+        // SSE: join_room
+        if (g_web_server) {
+            g_web_server->broadcast_sse("join_room",
+                "{\"room\":\"" + cmd.room_id.to_string() + "\",\"user\":" + std::to_string(user->id) + "}");
+        }
         break;
     }
 
@@ -557,6 +613,11 @@ void Session::process_command(const ClientCommand& cmd) {
         }
         std::cerr << "[session] user " << user->id << " leave room " << rm->id.to_string() << std::endl;
         user->clear_room();
+        // SSE: leave_room
+        if (g_web_server) {
+            g_web_server->broadcast_sse("leave_room",
+                "{\"room\":\"" + rm->id.to_string() + "\",\"user\":" + std::to_string(user->id) + "}");
+        }
         if (rm->on_user_leave(*user)) {
             std::unique_lock lock(user->server->rooms_mtx);
             user->server->rooms.erase(rm->id.to_string());

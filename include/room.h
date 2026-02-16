@@ -29,6 +29,12 @@ struct Record {
     float std_dev = 0, std_score = 0;
 };
 
+// ── Round history ────────────────────────────────────────────────────
+struct RoundHistory {
+    int32_t chart_id = 0;
+    std::vector<Record> records;
+};
+
 // ── Internal room state ──────────────────────────────────────────────
 enum class InternalRoomStateType { SelectChart, WaitForReady, Playing };
 
@@ -71,6 +77,10 @@ struct Room : std::enable_shared_from_this<Room> {
 
     mutable std::shared_mutex chart_mtx;
     std::optional<Chart> chart;
+
+    // Round history for API
+    mutable std::shared_mutex rounds_mtx;
+    std::vector<RoundHistory> rounds_history;
 
     Room(RoomId id, std::weak_ptr<User> host_user);
 

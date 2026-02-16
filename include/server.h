@@ -46,6 +46,7 @@ public:
     ~Server();
 
     void run(); // Main accept loop (blocks)
+    std::shared_ptr<ServerState> get_state() const { return state_; }
 
 private:
     int listen_fd_ = -1;

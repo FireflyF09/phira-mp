@@ -1,9 +1,11 @@
 #include "room.h"
 #include "session.h"
 #include "server.h"
+#include "web_server.h"
 #include <algorithm>
 #include <iostream>
 #include <random>
+#include <sstream>
 
 // ── InternalRoomState ────────────────────────────────────────────────
 RoomState InternalRoomState::to_client(std::optional<int32_t> chart_id) const {
@@ -60,6 +62,30 @@ ClientRoomState Room::client_state(const User& user) const {
 
 void Room::on_state_change() {
     broadcast(ServerCommand::change_state(client_room_state()));
+    // SSE: update_room
+    if (g_web_server) {
+        std::string state_str;
+        {
+            std::shared_lock sl(state_mtx);
+            switch (state.type) {
+                case InternalRoomStateType::SelectChart: state_str = "SELECTING_CHART"; break;
+                case InternalRoomStateType::WaitForReady: state_str = "WAITING_FOR_READY"; break;
+                case InternalRoomStateType::Playing: state_str = "PLAYING"; break;
+            }
+        }
+        std::optional<int32_t> cid;
+        {
+            std::shared_lock cl(chart_mtx);
+            if (chart) cid = chart->id;
+        }
+        std::ostringstream oss;
+        oss << "{\"room\":\"" << id.to_string() << "\",\"data\":{\"state\":\"" << state_str << "\"";
+        if (cid) oss << ",\"chart\":" << *cid;
+        oss << ",\"lock\":" << (is_locked() ? "true" : "false");
+        oss << ",\"cycle\":" << (is_cycle() ? "true" : "false");
+        oss << "}}";
+        g_web_server->broadcast_sse("update_room", oss.str());
+    }
 }
 
 bool Room::add_user(std::weak_ptr<User> user, bool is_monitor) {
@@ -213,6 +239,11 @@ void Room::check_all_ready() {
                 std::unique_lock lock2(state_mtx);
                 state = InternalRoomState::playing();
             }
+            // SSE: start_round
+            if (g_web_server) {
+                g_web_server->broadcast_sse("start_round",
+                    "{\"room\":\"" + id.to_string() + "\"}");
+            }
             on_state_change();
         }
     } else if (state.type == InternalRoomStateType::Playing) {
@@ -225,6 +256,37 @@ void Room::check_all_ready() {
             }
         }
         if (all_done) {
+            // Save round history before clearing state
+            RoundHistory round;
+            {
+                std::shared_lock cl(chart_mtx);
+                if (chart) round.chart_id = chart->id;
+            }
+            for (auto& [uid, rec] : state.results) {
+                round.records.push_back(rec);
+            }
+            {
+                std::unique_lock rl(rounds_mtx);
+                rounds_history.push_back(std::move(round));
+            }
+
+            // SSE: player scores + start_round
+            if (g_web_server) {
+                for (auto& [uid, rec] : state.results) {
+                    std::ostringstream oss;
+                    oss << "{\"room\":\"" << id.to_string() << "\",\"record\":"
+                        << "{\"id\":" << rec.id << ",\"player\":" << rec.player
+                        << ",\"score\":" << rec.score << ",\"perfect\":" << rec.perfect
+                        << ",\"good\":" << rec.good << ",\"bad\":" << rec.bad
+                        << ",\"miss\":" << rec.miss << ",\"max_combo\":" << rec.max_combo
+                        << ",\"accuracy\":" << rec.accuracy
+                        << ",\"full_combo\":" << (rec.full_combo ? "true" : "false")
+                        << ",\"std\":" << rec.std_dev << ",\"std_score\":" << rec.std_score
+                        << "}}";
+                    g_web_server->broadcast_sse("player_score", oss.str());
+                }
+            }
+
             lock.unlock();
             send(Message::game_end());
             {
