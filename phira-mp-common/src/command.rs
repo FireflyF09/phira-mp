@@ -2,6 +2,7 @@ use crate::{BinaryData, BinaryReader, BinaryWriter};
 use anyhow::{bail, Result};
 use half::f16;
 use phira_mp_macros::BinaryData;
+use serde_json::Value;
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 type SResult<T> = Result<T, String>;
@@ -180,7 +181,11 @@ pub enum ClientCommand {
 
     // Command for server console clients
     ConsoleAuthenticate { token: Varchar<32> },
-    QueryRooms { id: Option<RoomId> },
+    RoomMonitorAuthenticate { key: Vec<u8> },
+
+    QueryRoomList,
+    QueryRoomById { id: RoomId },
+    QueryRoomOfUser { id: i32 },
 }
 
 #[derive(Clone, Debug, BinaryData)]
@@ -314,5 +319,5 @@ pub enum ServerCommand {
     Abort(SResult<()>),
 
     // command for console clients
-    ResponseRooms(String),
+    RoomResponse(SResult<Value>),
 }

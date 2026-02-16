@@ -2,8 +2,15 @@ use crate::{vacant_entry, IdMap, Room, SafeMap, Session, User};
 use anyhow::Result;
 use phira_mp_common::RoomId;
 use serde::Deserialize;
-use std::{fs::File, sync::Arc};
-use tokio::{net::TcpListener, sync::mpsc, task::JoinHandle};
+use std::{
+    fs::File,
+    sync::{Arc, Weak},
+};
+use tokio::{
+    net::TcpListener,
+    sync::{mpsc, RwLock},
+    task::JoinHandle,
+};
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -45,7 +52,7 @@ pub struct ServerState {
     pub users: SafeMap<i32, Arc<User>>,
 
     pub rooms: SafeMap<RoomId, Arc<Room>>,
-
+    pub room_monitor: RwLock<Option<Weak<Session>>>,
     pub lost_con_tx: mpsc::Sender<Uuid>,
 }
 
@@ -68,6 +75,7 @@ impl From<TcpListener> for Server {
             users: SafeMap::default(),
 
             rooms: SafeMap::default(),
+            room_monitor: RwLock::new(None),
 
             lost_con_tx,
         });

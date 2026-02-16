@@ -924,6 +924,7 @@ dependencies = [
  "chrono",
  "half",
  "phira-mp-macros",
+ "serde_json",
  "tap",
  "tokio",
  "tracing",

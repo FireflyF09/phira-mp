@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::Hash, str::FromStr};
+use std::{collections::HashMap, hash::Hash};
 
 use anyhow::{anyhow, Result};
 use byteorder::{ByteOrder, LittleEndian as LE};
@@ -374,7 +374,7 @@ impl BinaryData for Value {
             1 => Ok(Value::Bool(bool::read_binary(r)?)),
             2 => Ok(Value::Number(Number::read_binary(r)?)),
             3 => Ok(Value::String(String::read_binary(r)?)),
-            4 => Ok(Value::Array(BinaryData::read_binary(r)?)),
+            4 => Ok(Value::Array(Vec::read_binary(r)?)),
             5 => {
                 let size = r.uleb()?;
                 let mut map = serde_json::Map::new();

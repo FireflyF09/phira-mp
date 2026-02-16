@@ -1,7 +1,8 @@
-use crate::{Chart, Record, User};
+use crate::{Chart, Record, ServerState, User};
 use anyhow::{bail, Result};
 use phira_mp_common::{ClientRoomState, Message, RoomId, RoomState, ServerCommand};
 use rand::{seq::SliceRandom, thread_rng};
+use serde_json::{json, Value};
 use std::{
     collections::{HashMap, HashSet},
     ops::Deref,
@@ -289,5 +290,51 @@ impl Room {
             }
             _ => {}
         }
+    }
+}
+
+async fn convert_room(room: &Room) -> Value {
+    return json!({
+        "host": room.host.read().await.upgrade().map_or(-1, |x| x.id),
+        "users": room.users().await.iter().map(|x| x.id).collect::<Vec<_>>(),
+        "lock": room.is_locked(),
+        "cycle": room.is_cycle(),
+        "chart": room.chart.read().await.as_ref().map(|x| x.id),
+        "state": match room.state.read().await.deref() {
+            InternalRoomState::Playing { .. } => "PLAYING",
+            InternalRoomState::SelectChart => "SELECTING_CHART",
+            InternalRoomState::WaitForReady { .. } => "WAITING_FOR_READY",
+        },
+    });
+}
+
+pub async fn query_room_list(server: &ServerState) -> Value {
+    let mut rooms = Vec::new();
+    for (id, room) in server.rooms.read().await.iter() {
+        rooms.push(json!({
+            "name": id.to_string(),
+            "data": convert_room(room).await
+        }));
+    }
+    Value::Array(rooms)
+}
+
+pub async fn query_room_by_id(server: &ServerState, id: RoomId) -> Value {
+    if let Some(room) = server.rooms.read().await.get(&id) {
+        convert_room(room).await
+    } else {
+        Value::Null
+    }
+}
+
+pub async fn query_room_of_user(server: &ServerState, id: i32) -> Value {
+    if let Some(user) = server.users.read().await.get(&id) {
+        if let Some(room) = user.room.read().await.as_ref() {
+            convert_room(room).await
+        } else {
+            Value::Null
+        }
+    } else {
+        Value::Null
     }
 }
