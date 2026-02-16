@@ -4,8 +4,8 @@ use crate::{
 };
 use anyhow::{anyhow, bail, Context, Result};
 use phira_mp_common::{
-    generate_secret_key, ClientCommand, JoinRoomResponse, Message, ServerCommand, Stream, UserInfo,
-    HEARTBEAT_DISCONNECT_TIMEOUT,
+    generate_secret_key, ClientCommand, JoinRoomResponse, Message, RoomState, ServerCommand,
+    Stream, UserInfo, HEARTBEAT_DISCONNECT_TIMEOUT,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -445,6 +445,13 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
             }
         };
     }
+    macro_rules! send_room_event {
+        ($event:expr) => {
+            if let Some(p) = user.server.get_room_monitor().await {
+                p.try_send($event).await;
+            }
+        };
+    }
     match cmd {
         ClientCommand::Ping => unreachable!(),
         ClientCommand::Authenticate { .. }
@@ -525,8 +532,12 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                 }))
                 .await;
                 drop(map_guard);
-                *room_guard = Some(room);
 
+                send_room_event!(ServerCommand::CreateRoomEvent {
+                    room: id.clone(),
+                    data: room.into_json().await,
+                });
+                *room_guard = Some(room);
                 info!(user = user.id, room = id.to_string(), "user create room");
                 Ok(())
             }
@@ -572,6 +583,13 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                     name: user.name.clone(),
                 })
                 .await;
+
+                if !monitor {
+                    send_room_event!(ServerCommand::JoinRoomEvent {
+                        room: id.clone(),
+                        user: user.id,
+                    });
+                }
                 *room_guard = Some(Arc::clone(&room));
                 Ok(JoinRoomResponse {
                     state: room.client_room_state().await,
@@ -603,6 +621,11 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                 if room.on_user_leave(&user).await {
                     user.server.rooms.write().await.remove(&room.id);
                 }
+
+                send_room_event!(ServerCommand::LeaveRoomEvent {
+                    room: room.id.clone(),
+                    user: user.id,
+                });
                 Ok(())
             }
             .await;
@@ -620,6 +643,11 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                 );
                 room.locked.store(lock, Ordering::SeqCst);
                 room.send(Message::LockRoom { lock }).await;
+
+                send_room_event!(ServerCommand::UpdateRoomEvent {
+                    room: room.id.clone(),
+                    data: json!({"lock": lock}),
+                });
                 Ok(())
             }
             .await;
@@ -637,6 +665,11 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                 );
                 room.cycle.store(cycle, Ordering::SeqCst);
                 room.send(Message::CycleRoom { cycle }).await;
+
+                send_room_event!(ServerCommand::UpdateRoomEvent {
+                    room: room.id.clone(),
+                    data: json!({"cycle": cycle})
+                });
                 Ok(())
             }
             .await;
@@ -668,6 +701,11 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                     .await;
                     *room.chart.write().await = Some(res);
                     room.on_state_change().await;
+
+                    send_room_event!(ServerCommand::UpdateRoomEvent {
+                        room: room.id.clone(),
+                        data: json!({"chart": id})
+                    });
                     Ok(())
                 }
                 .instrument(span)
@@ -692,6 +730,15 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                 };
                 room.on_state_change().await;
                 room.check_all_ready().await;
+
+                let state_str = match *room.state.read().await {
+                    InternalRoomState::Playing { .. } => "PLAYING",
+                    _ => "WAITING_FOR_READY",
+                };
+                send_room_event!(ServerCommand::UpdateRoomEvent {
+                    room: room.id.clone(),
+                    data: json!({"state": state_str})
+                });
                 Ok(())
             }
             .await;
@@ -708,6 +755,13 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                     room.send(Message::Ready { user: user.id }).await;
                     drop(guard);
                     room.check_all_ready().await;
+
+                    if matches!(*room.state.read().await, InternalRoomState::Playing { .. }) {
+                        send_room_event!(ServerCommand::UpdateRoomEvent {
+                            room: room.id.clone(),
+                            data: json!({"state": "PLAYING"})
+                        });
+                    }
                 }
                 Ok(())
             }
@@ -769,6 +823,16 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                     }
                     drop(guard);
                     room.check_all_ready().await;
+
+                    if matches!(
+                        *room.state.read().await,
+                        InternalRoomState::SelectChart { .. }
+                    ) {
+                        send_room_event!(ServerCommand::UpdateRoomEvent {
+                            room: room.id.clone(),
+                            data: json!({"state": "SELECTING_CHART"})
+                        });
+                    }
                 }
                 Ok(())
             }
@@ -789,6 +853,16 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                     drop(guard);
                     room.send(Message::Abort { user: user.id }).await;
                     room.check_all_ready().await;
+
+                    if matches!(
+                        room.state.read().await.to_client(None),
+                        RoomState::SelectChart(_)
+                    ) {
+                        send_room_event!(ServerCommand::UpdateRoomEvent {
+                            room: room.id.clone(),
+                            data: json!({"state": "SELECTING_CHART"})
+                        });
+                    }
                 }
                 Ok(())
             }
@@ -803,25 +877,10 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                 let mut info = HashMap::new();
                 let mut user_room_map = HashMap::new();
                 for (id, room) in user.server.rooms.read().await.iter() {
-                    let users = room.users().await.iter().map(|x| x.id).collect::<Vec<_>>();
-                    for uid in &users {
-                        user_room_map.insert(uid.clone(), id.clone());
+                    for uid in room.users().await {
+                        user_room_map.insert(uid.id, id.clone());
                     }
-                    info.insert(
-                        id.clone(),
-                        json!({
-                            "host": room.host.read().await.upgrade().map_or(-1, |x| x.id),
-                            "users": users,
-                            "lock": room.is_locked(),
-                            "cycle": room.is_cycle(),
-                            "chart": room.chart.read().await.as_ref().map(|x| x.id),
-                            "state": match *room.state.read().await {
-                                InternalRoomState::Playing { .. } => "PLAYING",
-                                InternalRoomState::SelectChart => "SELECTING_CHART",
-                                InternalRoomState::WaitForReady { .. } => "WAITING_FOR_READY",
-                            },
-                        }),
-                    );
+                    info.insert(id.clone(), room.into_json().await);
                 }
                 Ok((info, user_room_map))
             }

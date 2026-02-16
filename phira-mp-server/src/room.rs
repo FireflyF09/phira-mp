@@ -2,6 +2,7 @@ use crate::{Chart, Record, User};
 use anyhow::{bail, Result};
 use phira_mp_common::{ClientRoomState, Message, RoomId, RoomState, ServerCommand};
 use rand::{seq::SliceRandom, thread_rng};
+use serde_json::{json, Value};
 use std::{
     collections::{HashMap, HashSet},
     ops::Deref,
@@ -289,5 +290,20 @@ impl Room {
             }
             _ => {}
         }
+    }
+
+    pub async fn into_json(&self) -> Value {
+        json!({
+            "host": self.host.read().await.upgrade().map_or(-1, |x| x.id),
+            "users": self.users().await.iter().map(|x| x.id).collect::<Vec<_>>(),
+            "lock": self.is_locked(),
+            "cycle": self.is_cycle(),
+            "chart": self.chart.read().await.as_ref().map(|x| x.id),
+            "state": match *self.state.read().await {
+                InternalRoomState::Playing { .. } => "PLAYING",
+                InternalRoomState::SelectChart => "SELECTING_CHART",
+                InternalRoomState::WaitForReady { .. } => "WAITING_FOR_READY",
+            },
+        })
     }
 }

@@ -335,11 +335,11 @@ pub enum ServerCommand {
         room: RoomId,
         user: i32,
     },
-    PlayerScore {
+    PlayerScoreEvent {
         room: RoomId,
         record: Value,
     },
-    StartRound {
+    StartRoundEvent {
         room: RoomId,
     },
 }

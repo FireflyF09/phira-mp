@@ -56,6 +56,16 @@ pub struct ServerState {
     pub lost_con_tx: mpsc::Sender<Uuid>,
 }
 
+impl ServerState {
+    pub async fn get_room_monitor(&self) -> Option<Arc<Session>> {
+        self.room_monitor
+            .read()
+            .await
+            .as_ref()
+            .and_then(|p| p.upgrade())
+    }
+}
+
 pub struct Server {
     state: Arc<ServerState>,
     listener: TcpListener,
@@ -122,15 +132,6 @@ impl Server {
         );
         entry.insert(session);
         Ok(())
-    }
-
-    pub async fn get_room_monitor(&self) -> Option<Arc<Session>> {
-        self.state
-            .room_monitor
-            .read()
-            .await
-            .as_ref()
-            .and_then(|p| p.upgrade())
     }
 }
 
