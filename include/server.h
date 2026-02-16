@@ -2,6 +2,7 @@
 #include "commands.h"
 #include "room.h"
 #include "session.h"
+#include "plugin_api.h"
 // PluginManager forward declaration
 class PluginManager;
 #include <memory>
@@ -52,6 +53,11 @@ struct ServerState : std::enable_shared_from_this<ServerState> {
     };
     std::unordered_map<std::string, TempAdminToken> temp_admin_tokens;
     
+    // Ban management
+    mutable std::mutex ban_mtx;
+    std::unordered_set<int32_t> banned_users; // banned user IDs
+    std::unordered_map<std::string, std::unordered_set<int32_t>> banned_room_users; // room ID -> banned user IDs
+    
     struct OtpSession {
         std::string otp;
         uint64_t expires_at;
@@ -95,20 +101,110 @@ struct ServerState : std::enable_shared_from_this<ServerState> {
 };
 
 // ── Server ───────────────────────────────────────────────────────────
-class Server {
+class Server : public PluginServerInterface {
 public:
     explicit Server(uint16_t port);
     ~Server();
 
     void run(); // Main accept loop (blocks)
 
+    // PluginServerInterface implementation
+    void shutdown_server() override;
+    void reload_plugins() override;
+    
+    bool kick_user(int32_t user_id, bool preserve_room = false) override;
+    bool ban_user(int32_t user_id) override;
+    bool unban_user(int32_t user_id) override;
+    bool is_user_banned(int32_t user_id) override;
+    std::vector<int32_t> get_banned_users() override;
+    
+    bool ban_room_user(int32_t user_id, const std::string& room_id) override;
+    bool unban_room_user(int32_t user_id, const std::string& room_id) override;
+    bool is_user_banned_from_room(int32_t user_id, const std::string& room_id) override;
+    
+    bool disband_room(const std::string& room_id) override;
+    bool set_max_users(const std::string& room_id, int max_users) override;
+    std::optional<int> get_room_max_users(const std::string& room_id) override;
+    
+    bool broadcast_message(const std::string& message) override;
+    bool roomsay_message(const std::string& room_id, const std::string& message) override;
+    
+    bool set_replay_status(bool enabled) override;
+    bool get_replay_status() override;
+    
+    bool set_room_creation_status(bool enabled) override;
+    bool get_room_creation_status() override;
+    
+    bool add_ip_to_blacklist(const std::string& ip, bool is_admin = true) override;
+    bool remove_ip_from_blacklist(const std::string& ip, bool is_admin = true) override;
+    bool is_ip_banned(const std::string& ip) override;
+    std::vector<std::string> get_banned_ips(bool admin_list = true) override;
+    void clear_ip_blacklist(bool admin_list = true) override;
+    
+    bool enable_contest(const std::string& room_id, bool manual_start = false, bool auto_disband = false) override;
+    bool disable_contest(const std::string& room_id) override;
+    bool add_contest_whitelist(const std::string& room_id, int32_t user_id) override;
+    bool remove_contest_whitelist(const std::string& room_id, int32_t user_id) override;
+    bool start_contest(const std::string& room_id, bool force = false) override;
+    
+    int get_connected_user_count() override;
+    int get_active_room_count() override;
+    std::vector<std::string> get_room_list() override;
+    std::vector<int32_t> get_connected_user_ids() override;
+    
+    std::optional<std::string> get_user_name(int32_t user_id) override;
+    std::optional<std::string> get_user_language(int32_t user_id) override;
+    std::optional<std::string> get_user_room_id(int32_t user_id) override;
+    
+    std::optional<int> get_room_user_count(const std::string& room_id) override;
+    std::vector<int32_t> get_room_user_ids(const std::string& room_id) override;
+    std::optional<std::string> get_room_owner_id(const std::string& room_id) override;
+    
+    void save_admin_data() override;
+    void load_admin_data() override;
+
 private:
     int listen_fd_ = -1;
     uint16_t port_;
     std::shared_ptr<ServerState> state_;
     std::thread lost_con_thread_;
+    std::thread cli_thread_;
     std::shared_ptr<PluginManager> plugin_manager_;
+    std::atomic<bool> running_{true};
 
     void lost_connection_loop();
+    void cli_loop();
     void accept_one();
+
+    // CLI command handlers
+    void handle_cli_command(const std::string& command);
+    void show_help();
+    void show_status();
+    void list_rooms();
+    void list_users();
+    void show_user_details(const std::string& user_id_str);
+    void broadcast_message_cli(const std::string& message);
+    void roomsay_message_cli(const std::string& room_id, const std::string& message);
+    void kick_user_cli(const std::string& user_id);
+    void ban_user_cli(const std::string& user_id);
+    void unban_user_cli(const std::string& user_id_str);
+    void show_banlist();
+    void ban_room_user_cli(const std::string& user_id_str, const std::string& room_id);
+    void unban_room_user_cli(const std::string& user_id_str, const std::string& room_id);
+    void set_replay_status_cli(const std::string& status);
+    void set_room_creation_status_cli(const std::string& status);
+    void disband_room_cli(const std::string& room_id);
+    void set_max_users_cli(const std::string& room_id, const std::string& count_str);
+    void handle_ipblacklist(const std::vector<std::string>& args);
+    void handle_contest(const std::vector<std::string>& args);
+    void reload_plugins_cli();
+    void shutdown_server_cli();
+
+    // Helper methods for CLI commands
+    void broadcast_to_room(const std::string& room_id, ServerCommand cmd);
+    void save_admin_data_cli();
+    void load_admin_data_cli();
+    
+    // Admin helper methods
+    bool admin_disconnect_user(int32_t user_id, bool preserve_room = false);
 };

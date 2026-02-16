@@ -405,6 +405,18 @@ void Session::handle_authenticate(const std::string& token, std::shared_ptr<Serv
     std::cerr << "[session] " << id.str() << " <- id=" << user_id
               << " name=" << user_name << " lang=" << user_lang_str << std::endl;
 
+    // Check if user is banned
+    {
+        std::lock_guard<std::mutex> lock(server->admin_state_mtx);
+        if (server->banned_users.find(user_id) != server->banned_users.end()) {
+            std::cerr << "[session] user " << user_id << " is banned, rejecting authentication" << std::endl;
+            try_send(ServerCommand::authenticate_err("banned"));
+            // Close connection after a short delay
+            stop();
+            return;
+        }
+    }
+
     // Check if user already exists (reconnect)
     {
         std::unique_lock lock(server->users_mtx);
@@ -493,10 +505,15 @@ void Session::process_command(const ClientCommand& cmd) {
                                                     tl(lang, "create-id-occupied")));
                 break;
             }
-            auto new_room = std::make_shared<Room>(rid, std::weak_ptr<User>(user));
+            auto new_room = std::make_shared<Room>(rid, std::weak_ptr<User>(user), ROOM_MAX_USERS);
             user->server->rooms[rid.to_string()] = new_room;
             new_room->send(Message::create_room(user->id));
             user->set_room(new_room);
+            
+            // Notify plugins about room creation
+            if (auto pm = user->server->plugin_manager.lock()) {
+                pm->notify_room_create(new_room);
+            }
         }
         std::cerr << "[session] user " << user->id << " create room " << rid.to_string() << std::endl;
         try_send(ServerCommand::simple_ok(ServerCommandType::CreateRoom));
@@ -579,6 +596,10 @@ void Session::process_command(const ClientCommand& cmd) {
         user->clear_room();
         if (rm->on_user_leave(*user)) {
             std::unique_lock lock(user->server->rooms_mtx);
+            // Notify plugins about room destruction before erasing
+            if (auto pm = user->server->plugin_manager.lock()) {
+                pm->notify_room_destroy(rm);
+            }
             user->server->rooms.erase(rm->id.to_string());
         }
         try_send(ServerCommand::simple_ok(ServerCommandType::LeaveRoom));

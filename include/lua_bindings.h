@@ -12,7 +12,7 @@ extern "C" {
 }
 
 // Register all C++ classes into Lua state
-void register_lua_bindings(lua_State* L, std::shared_ptr<ServerState> server_state);
+void register_lua_bindings(lua_State* L, std::shared_ptr<ServerState> server_state, PluginServerInterface* server_interface = nullptr);
 
 // Lua‑visible functions
 int lua_get_user(lua_State* L);

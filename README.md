@@ -38,6 +38,14 @@ A complete, feature-rich multiplayer game server implementation in C++20, provid
 - **User Management** - User banning, disconnection, and monitoring
 - **Broadcast System** - Server-wide message broadcasting
 
+### Interactive CLI / 交互式命令行界面
+- **Real-time Command Input** - Interactive console for server administration
+- **Server Status Monitoring** - View connected users, active rooms, and server stats
+- **Room Management** - List, disband, and configure rooms directly
+- **User Management** - Kick, ban, unban, and view user details
+- **Plugin Control** - Hot-reload plugins without restarting server
+- **Broadcast Messaging** - Send messages to all rooms or specific rooms
+
 ## 🚀 Quick Start / 快速开始
 
 ### Prerequisites / 环境要求
@@ -87,7 +95,83 @@ The server will:
 2. Scan and load plugins from `plugins/` directory
 3. Start game server on specified port (default: 12346)
 4. Start HTTP API server on port 61234
-5. Begin accepting connections
+5. Start interactive CLI for console administration
+6. Begin accepting connections
+
+### Interactive CLI Usage / 交互式CLI使用
+
+When you start the server, you'll see a CLI prompt appear:
+```
+=== Phira MP Server CLI ===
+Type 'help' for available commands
+==============================
+
+> 
+```
+
+#### Available Commands / 可用命令
+
+**General Commands:**
+- `help`, `?` - Show help message
+- `status`, `info` - Show server status
+- `stop`, `shutdown` - Show shutdown instructions
+
+**Room Management:**
+- `list`, `rooms` - List all active rooms
+- `disband <roomId>` - Disband a room
+- `maxusers <roomId> <count>` - Set room max users (1-64)
+- `roomcreation <on|off|status>` - Control room creation
+
+**User Management:**
+- `users` - List all online users
+- `user <userId>` - Show user details
+- `kick <userId>` - Kick a user from the server
+- `ban <userId>` - Ban a user from the server
+- `unban <userId>` - Unban a user
+- `banlist` - Show banned users list
+
+**Communication:**
+- `broadcast <msg>` - Broadcast message to all rooms
+- `say <msg>` - Alias for broadcast
+- `roomsay <roomId> <msg>` - Send message to specific room
+
+**Server Management:**
+- `reload` - Reload all plugins
+- `replay <on|off|status>` - Control replay recording
+
+#### Command Examples / 命令示例
+
+```bash
+# View server status
+> status
+
+# List all active rooms
+> list
+
+# List all online users
+> users
+
+# Kick a user
+> kick 12345
+
+# Broadcast server message
+> broadcast Server will restart in 10 minutes
+
+# Send message to specific room
+> roomsay room1 Please follow the game rules
+
+# Disband a room
+> disband room1
+
+# Reload all plugins
+> reload
+
+# Control replay recording
+> replay on
+> replay status
+```
+
+**Note**: For advanced commands (contest mode, IP blacklist management, etc.), use the HTTP API on port 61234.
 
 ## ⚙️ Configuration / 配置
 
@@ -148,42 +232,62 @@ The server comes with 5 built-in plugins:
 5. **virtual-room** - Virtual room creation and management
 
 ### Plugin Development / 插件开发
-Plugins are written in Lua and have access to the server through the `phira` global table:
+Plugins are written in Lua and have access to the server through the `phira` global table.
 
+**For complete plugin development documentation, see [PLUGIN_DEVELOPMENT.md](PLUGIN_DEVELOPMENT.md)**
+
+The plugin system provides:
+- **40+ Server Management APIs** - Full control over users, rooms, messages, bans, contests, and server state
+- **Comprehensive Event Hooks** - Real-time notifications for user joins/leaves, room creation/destruction, kicks, bans, and command filtering
+- **HTTP Route Registration** - Extend the HTTP API with custom endpoints
+- **Thread-Safe Operations** - All APIs are properly synchronized for concurrent access
+
+#### New Event Hooks (v2.0+)
+- `on_user_kick(user, room, reason)` - When a user is kicked
+- `on_user_ban(user, reason, duration)` - When a user is banned  
+- `on_user_unban(user_id)` - When a user is unbanned
+- `on_room_create(room)` - When a room is created
+- `on_room_destroy(room)` - When a room is destroyed
+
+#### New Management APIs (v2.0+)
 ```lua
--- Example plugin structure
-local plugin = {}
+-- User management
+phira.kick_user(user_id, preserve_room)
+phira.ban_user(user_id)
+phira.unban_user(user_id)
+phira.is_user_banned(user_id)
+phira.get_banned_users()
 
-function plugin.on_enable()
-    print("Plugin enabled!")
-    
-    -- Register HTTP route
-    phira.http_register("GET", "/custom/endpoint", function(method, path, query, body)
-        return '{"message": "Hello from plugin!"}', "application/json"
-    end)
-    
-    -- Hook into events
-    phira.hook_event("on_user_join", function(user_id, username)
-        print("User joined: " .. username)
-    end)
-end
+-- Room management  
+phira.disband_room(room_id)
+phira.set_max_users(room_id, max_users)
+phira.get_room_max_users(room_id)
 
-function plugin.on_disable()
-    print("Plugin disabled!")
-end
+-- Messaging
+phira.broadcast_message(message)
+phira.roomsay_message(room_id, message)
 
-return plugin
+-- Server control
+phira.shutdown_server()
+phira.reload_plugins()
+
+-- Status queries
+phira.get_connected_user_count()
+phira.get_active_room_count()
+phira.get_room_list()
+
+-- IP blacklist management
+phira.add_ip_to_blacklist(ip, is_admin)
+phira.remove_ip_from_blacklist(ip, is_admin)
+phira.is_ip_banned(ip)
+
+-- Contest management
+phira.enable_contest(room_id, manual_start, auto_disband)
+phira.disable_contest(room_id)
+phira.start_contest(room_id, force)
 ```
 
-### Available Lua API / 可用Lua API
-- `phira.http_register(method, path, handler)` - Register HTTP routes
-- `phira.hook_event(event_name, callback)` - Hook into server events
-- `phira.get_users()` - Get list of connected users
-- `phira.get_rooms()` - Get list of active rooms
-- `phira.broadcast(message)` - Send message to all users
-- `phira.kick_user(user_id, reason)` - Disconnect a user
-- `phira.create_room(config)` - Create a new room
-- `phira.get_server_stats()` - Get server statistics
+See the complete API reference in [PLUGIN_DEVELOPMENT.md](PLUGIN_DEVELOPMENT.md) for detailed documentation and examples.
 
 ## 🌐 HTTP API Reference / HTTP接口文档
 

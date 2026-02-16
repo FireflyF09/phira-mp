@@ -1,0 +1,9 @@
+{
+    "id": "test-api",
+    "name": "Test API Plugin",
+    "version": "1.0.0",
+    "author": "Developer",
+    "description": "Test plugin for new server API functions",
+    "enabled": true,
+    "dependencies": []
+}

@@ -12,8 +12,8 @@ namespace fs = std::filesystem;
 
 // ── LuaPlugin ──────────────────────────────────────────────────────────────
 
-LuaPlugin::LuaPlugin(const std::string& path, std::shared_ptr<ServerState> server_state)
-    : path_(path), server_state_(std::move(server_state)) {}
+LuaPlugin::LuaPlugin(const std::string& path, std::shared_ptr<ServerState> server_state, PluginServerInterface* server_interface)
+    : path_(path), server_state_(std::move(server_state)), server_interface_(server_interface) {}
 
 LuaPlugin::~LuaPlugin() {
     unload();
@@ -55,14 +55,18 @@ bool LuaPlugin::load_metadata() {
 }
 
 void LuaPlugin::register_functions() {
-    register_lua_bindings(L_, server_state_);
+    register_lua_bindings(L_, server_state_, server_interface_);
 }
 
 bool LuaPlugin::load() {
     if (loaded_) return true;
 
-    if (!load_metadata()) return false;
-    if (!metadata_.enabled) return false;
+    if (!load_metadata()) {
+        return false;
+    }
+    if (!metadata_.enabled) {
+        return false;
+    }
 
     L_ = luaL_newstate();
     if (!L_) {
@@ -73,13 +77,16 @@ bool LuaPlugin::load() {
 
     register_functions();
 
-    // Load main Lua script
-    fs::path main_script = fs::path(path_) / "init.lua";
+    // Load main Lua script - try main.lua first, then init.lua for compatibility
+    fs::path main_script = fs::path(path_) / "main.lua";
     if (!fs::exists(main_script)) {
-        std::cerr << "init.lua not found in plugin " << metadata_.id << std::endl;
-        lua_close(L_);
-        L_ = nullptr;
-        return false;
+        main_script = fs::path(path_) / "init.lua";
+        if (!fs::exists(main_script)) {
+            std::cerr << "Neither main.lua nor init.lua found in plugin " << metadata_.id << std::endl;
+            lua_close(L_);
+            L_ = nullptr;
+            return false;
+        }
     }
 
     if (luaL_dofile(L_, main_script.c_str()) != LUA_OK) {
@@ -152,6 +159,80 @@ void LuaPlugin::on_user_leave(std::shared_ptr<User> user, std::shared_ptr<Room> 
         push_room(L_, room);
         if (lua_pcall(L_, 2, 0, 0) != LUA_OK) {
             std::cerr << "Plugin " << metadata_.id << " on_user_leave error: " << lua_tostring(L_, -1) << std::endl;
+            lua_pop(L_, 1);
+        }
+    } else {
+        lua_pop(L_, 1); // remove non-function value
+    }
+}
+
+void LuaPlugin::on_room_create(std::shared_ptr<Room> room) {
+    if (!loaded_ || !L_) return;
+    lua_getglobal(L_, "on_room_create");
+    if (lua_isfunction(L_, -1)) {
+        push_room(L_, room);
+        if (lua_pcall(L_, 1, 0, 0) != LUA_OK) {
+            std::cerr << "Plugin " << metadata_.id << " on_room_create error: " << lua_tostring(L_, -1) << std::endl;
+            lua_pop(L_, 1);
+        }
+    } else {
+        lua_pop(L_, 1); // remove non-function value
+    }
+}
+
+void LuaPlugin::on_room_destroy(std::shared_ptr<Room> room) {
+    if (!loaded_ || !L_) return;
+    lua_getglobal(L_, "on_room_destroy");
+    if (lua_isfunction(L_, -1)) {
+        push_room(L_, room);
+        if (lua_pcall(L_, 1, 0, 0) != LUA_OK) {
+            std::cerr << "Plugin " << metadata_.id << " on_room_destroy error: " << lua_tostring(L_, -1) << std::endl;
+            lua_pop(L_, 1);
+        }
+    } else {
+        lua_pop(L_, 1); // remove non-function value
+    }
+}
+
+void LuaPlugin::on_user_kick(std::shared_ptr<User> user, std::shared_ptr<Room> room, const std::string& reason) {
+    if (!loaded_ || !L_) return;
+    lua_getglobal(L_, "on_user_kick");
+    if (lua_isfunction(L_, -1)) {
+        push_user(L_, user);
+        push_room(L_, room);
+        lua_pushstring(L_, reason.c_str());
+        if (lua_pcall(L_, 3, 0, 0) != LUA_OK) {
+            std::cerr << "Plugin " << metadata_.id << " on_user_kick error: " << lua_tostring(L_, -1) << std::endl;
+            lua_pop(L_, 1);
+        }
+    } else {
+        lua_pop(L_, 1); // remove non-function value
+    }
+}
+
+void LuaPlugin::on_user_ban(std::shared_ptr<User> user, const std::string& reason, int32_t duration_seconds) {
+    if (!loaded_ || !L_) return;
+    lua_getglobal(L_, "on_user_ban");
+    if (lua_isfunction(L_, -1)) {
+        push_user(L_, user);
+        lua_pushstring(L_, reason.c_str());
+        lua_pushinteger(L_, duration_seconds);
+        if (lua_pcall(L_, 3, 0, 0) != LUA_OK) {
+            std::cerr << "Plugin " << metadata_.id << " on_user_ban error: " << lua_tostring(L_, -1) << std::endl;
+            lua_pop(L_, 1);
+        }
+    } else {
+        lua_pop(L_, 1); // remove non-function value
+    }
+}
+
+void LuaPlugin::on_user_unban(int32_t user_id) {
+    if (!loaded_ || !L_) return;
+    lua_getglobal(L_, "on_user_unban");
+    if (lua_isfunction(L_, -1)) {
+        lua_pushinteger(L_, user_id);
+        if (lua_pcall(L_, 1, 0, 0) != LUA_OK) {
+            std::cerr << "Plugin " << metadata_.id << " on_user_unban error: " << lua_tostring(L_, -1) << std::endl;
             lua_pop(L_, 1);
         }
     } else {
@@ -262,8 +343,8 @@ bool LuaPlugin::on_before_command(std::shared_ptr<User> user, const ClientComman
 
 // ── PluginManager ──────────────────────────────────────────────────────────
 
-PluginManager::PluginManager(std::shared_ptr<ServerState> server_state)
-    : server_state_(std::move(server_state)), http_server_(nullptr) {}
+PluginManager::PluginManager(std::shared_ptr<ServerState> server_state, PluginServerInterface* server_interface)
+    : server_state_(std::move(server_state)), server_interface_(server_interface), http_server_(nullptr) {}
 
 PluginManager::~PluginManager() {
     unload_all();
@@ -279,7 +360,7 @@ void PluginManager::load_all(const std::string& plugins_dir) {
     for (const auto& entry : fs::directory_iterator(plugins_dir)) {
         if (!entry.is_directory()) continue;
         std::cerr << "Found plugin directory: " << entry.path().string() << std::endl;
-        auto plugin = std::make_unique<LuaPlugin>(entry.path().string(), server_state_);
+        auto plugin = std::make_unique<LuaPlugin>(entry.path().string(), server_state_, server_interface_);
         if (plugin->load()) {
             plugins_[plugin->id()] = std::move(plugin);
         } else {
@@ -324,6 +405,36 @@ bool PluginManager::filter_command(std::shared_ptr<User> user, const ClientComma
         *out_cmd = current;
     }
     return modified;
+}
+
+void PluginManager::notify_room_create(std::shared_ptr<Room> room) {
+    for (auto& [id, plugin] : plugins_) {
+        plugin->on_room_create(room);
+    }
+}
+
+void PluginManager::notify_room_destroy(std::shared_ptr<Room> room) {
+    for (auto& [id, plugin] : plugins_) {
+        plugin->on_room_destroy(room);
+    }
+}
+
+void PluginManager::notify_user_kick(std::shared_ptr<User> user, std::shared_ptr<Room> room, const std::string& reason) {
+    for (auto& [id, plugin] : plugins_) {
+        plugin->on_user_kick(user, room, reason);
+    }
+}
+
+void PluginManager::notify_user_ban(std::shared_ptr<User> user, const std::string& reason, int32_t duration_seconds) {
+    for (auto& [id, plugin] : plugins_) {
+        plugin->on_user_ban(user, reason, duration_seconds);
+    }
+}
+
+void PluginManager::notify_user_unban(int32_t user_id) {
+    for (auto& [id, plugin] : plugins_) {
+        plugin->on_user_unban(user_id);
+    }
 }
 
 void PluginManager::start_http_server(int port) {

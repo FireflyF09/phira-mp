@@ -1,0 +1,42 @@
+# 编译产物
+*.o
+*.so
+*.a
+*.dll
+*.exe
+
+# 可执行文件
+phira-mp-server
+
+# 对象文件目录
+obj/
+
+# 编译依赖
+*.d
+
+# 日志文件
+*.log
+
+# 临时文件
+*.tmp
+*.temp
+
+# 配置文件（可以包含敏感信息）
+server_config.yml
+
+# 管理员数据（包含敏感信息）
+admin_data.json
+
+# 回放文件
+replays/*
+
+# IDE文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 系统文件
+.DS_Store
+Thumbs.db

@@ -20,8 +20,8 @@ RoomState InternalRoomState::to_client(std::optional<int32_t> chart_id) const {
 
 // ── Room ─────────────────────────────────────────────────────────────
 
-Room::Room(RoomId rid, std::weak_ptr<User> host_user)
-    : id(std::move(rid)), host(std::move(host_user))
+Room::Room(RoomId rid, std::weak_ptr<User> host_user, int max_users)
+    : id(std::move(rid)), host(std::move(host_user)), max_users(max_users)
 {
     // The host is the first user
     auto h = host.lock();

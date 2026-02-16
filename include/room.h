@@ -4,10 +4,12 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 struct User; // forward
@@ -72,7 +74,16 @@ struct Room : std::enable_shared_from_this<Room> {
     mutable std::shared_mutex chart_mtx;
     std::optional<Chart> chart;
 
-    Room(RoomId id, std::weak_ptr<User> host_user);
+    std::atomic<int> max_users{ROOM_MAX_USERS};
+    
+    struct ContestInfo {
+        std::unordered_set<int32_t> whitelist;
+        bool manual_start = true;
+        bool auto_disband = true;
+    };
+    std::optional<ContestInfo> contest;
+
+    Room(RoomId id, std::weak_ptr<User> host_user, int max_users = ROOM_MAX_USERS);
 
     bool is_live() const { return live.load(); }
     bool is_locked() const { return locked.load(); }
