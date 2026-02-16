@@ -1,0 +1,9 @@
+{
+    "id": "advanced-room-management",
+    "name": "Advanced Room Management",
+    "version": "1.0.0",
+    "description": "Adds advanced room features: virtual rooms, room cycling, room locking, etc.",
+    "author": "System",
+    "enabled": true,
+    "dependencies": []
+}

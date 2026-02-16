@@ -1,0 +1,9 @@
+{
+    "id": "replay-recorder",
+    "name": "Replay Recorder",
+    "version": "1.0.0",
+    "description": "Records game replays similar to tphira-mp",
+    "author": "System",
+    "enabled": true,
+    "dependencies": []
+}

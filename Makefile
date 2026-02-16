@@ -1,6 +1,6 @@
 CXX = g++
-CXXFLAGS = -std=c++20 -Wall -Wextra -O2 -pthread -Iinclude -static
-LDFLAGS = -pthread -luuid -static
+CXXFLAGS = -std=c++20 -Wall -Wextra -O2 -pthread -Iinclude -I/usr/include/lua5.4
+LDFLAGS = -pthread -luuid -llua5.4 -ldl
 
 SRCDIR = src
 INCDIR = include
@@ -33,3 +33,4 @@ $(OBJDIR)/session.o: $(INCDIR)/session.h $(INCDIR)/room.h $(INCDIR)/server.h
 $(OBJDIR)/room.o: $(INCDIR)/room.h $(INCDIR)/session.h $(INCDIR)/commands.h
 $(OBJDIR)/l10n.o: $(INCDIR)/l10n.h
 $(OBJDIR)/http_client.o: $(INCDIR)/http_client.h
+$(OBJDIR)/http_server.o: $(INCDIR)/http_server.h $(INCDIR)/server.h $(INCDIR)/room.h

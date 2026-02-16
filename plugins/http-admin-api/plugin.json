@@ -1,0 +1,9 @@
+{
+    "id": "http-admin-api",
+    "name": "HTTP Admin API",
+    "version": "1.0.0",
+    "description": "Provides HTTP API for server administration, similar to tphira-mp",
+    "author": "System",
+    "enabled": true,
+    "dependencies": []
+}

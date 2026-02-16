@@ -1,0 +1,9 @@
+{
+    "id": "admin-commands",
+    "name": "Admin Commands",
+    "version": "1.0.0",
+    "description": "Adds administrative commands to the server similar to tphira-mp",
+    "author": "System",
+    "enabled": true,
+    "dependencies": []
+}

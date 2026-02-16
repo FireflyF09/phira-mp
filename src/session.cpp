@@ -2,6 +2,7 @@
 #include "room.h"
 #include "server.h"
 #include "http_client.h"
+#include "plugin_manager.h"
 #include <iostream>
 #include <cstring>
 #include <algorithm>
@@ -325,6 +326,20 @@ void Session::recv_loop(std::shared_ptr<ServerState> server) {
             continue;
         }
 
+        // Plugin command filtering
+        if (auto pm = server->plugin_manager.lock()) {
+            ClientCommand filtered_cmd = cmd;
+            if (pm->filter_command(user, cmd, &filtered_cmd)) {
+                cmd = filtered_cmd;
+            }
+        }
+
+        // Check if command was cancelled by plugin (marked as Ping with monitor flag)
+        if (cmd.type == ClientCommandType::Ping && cmd.monitor) {
+            // Command cancelled, skip processing
+            continue;
+        }
+        
         // Process authenticated commands
         process_command(cmd);
     }
@@ -536,6 +551,11 @@ void Session::process_command(const ClientCommand& cmd) {
         target_room->broadcast(ServerCommand::on_join_room(user->to_info()));
         target_room->send(Message::join_room(user->id, user->name));
         user->set_room(target_room);
+
+        // Notify plugins
+        if (auto pm = user->server->plugin_manager.lock()) {
+            pm->notify_user_join(user, target_room);
+        }
 
         // Build join response
         JoinRoomResponse jr;
