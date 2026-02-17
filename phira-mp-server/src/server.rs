@@ -1,9 +1,16 @@
 use crate::{vacant_entry, IdMap, Room, SafeMap, Session, User};
 use anyhow::Result;
 use phira_mp_common::RoomId;
-use serde::Deserialize;
-use std::{fs::File, sync::Arc};
-use tokio::{net::TcpListener, sync::mpsc, task::JoinHandle};
+use serde::{Deserialize, Serialize};
+use std::{
+    fs::File,
+    sync::{Arc, Weak},
+};
+use tokio::{
+    net::TcpListener,
+    sync::{mpsc, RwLock},
+    task::JoinHandle,
+};
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -23,7 +30,7 @@ impl Default for ServerConfig {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Record {
     pub id: i32,
     pub player: i32,
@@ -45,8 +52,18 @@ pub struct ServerState {
     pub users: SafeMap<i32, Arc<User>>,
 
     pub rooms: SafeMap<RoomId, Arc<Room>>,
-
+    pub room_monitor: RwLock<Option<Weak<Session>>>,
     pub lost_con_tx: mpsc::Sender<Uuid>,
+}
+
+impl ServerState {
+    pub async fn get_room_monitor(&self) -> Option<Arc<Session>> {
+        self.room_monitor
+            .read()
+            .await
+            .as_ref()
+            .and_then(|p| p.upgrade())
+    }
 }
 
 pub struct Server {
@@ -68,6 +85,7 @@ impl From<TcpListener> for Server {
             users: SafeMap::default(),
 
             rooms: SafeMap::default(),
+            room_monitor: RwLock::new(None),
 
             lost_con_tx,
         });

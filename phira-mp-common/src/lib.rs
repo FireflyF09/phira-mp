@@ -5,7 +5,9 @@ mod command;
 pub use command::*;
 
 use anyhow::{bail, Error, Result};
-use std::{future::Future, marker::PhantomData, sync::Arc, time::Duration};
+use std::{
+    future::Future, marker::PhantomData, os::unix::ffi::OsStrExt, sync::Arc, time::Duration,
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -173,4 +175,15 @@ impl<S, R> Drop for Stream<S, R> {
         self.send_task_handle.abort();
         self.recv_task_handle.abort();
     }
+}
+
+pub fn generate_secret_key(info: &str, len: usize) -> Result<Vec<u8>> {
+    let ikm = std::env::var_os("HSN_SECRET_KEY")
+        .unwrap_or_else(|| "some_random_secret_key_for_debugging".into());
+    let salt = b"some$random#salt";
+
+    let h = hkdf::Hkdf::<sha2::Sha256>::new(Some(salt), ikm.as_bytes());
+    let mut okm = vec![0u8; len];
+    h.expand(info.as_bytes(), &mut okm)?;
+    Ok(okm)
 }

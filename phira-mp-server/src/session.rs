@@ -4,13 +4,14 @@ use crate::{
 };
 use anyhow::{anyhow, bail, Context, Result};
 use phira_mp_common::{
-    ClientCommand, JoinRoomResponse, Message, RoomId, ServerCommand, Stream, UserInfo,
-    HEARTBEAT_DISCONNECT_TIMEOUT,
+    generate_secret_key, ClientCommand, JoinRoomResponse, Message, RoomState, ServerCommand,
+    Stream, UserInfo, HEARTBEAT_DISCONNECT_TIMEOUT,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde_json::json;
 use std::{
-    collections::{hash_map::Entry, HashSet},
-    ops::{Deref, DerefMut},
+    collections::{hash_map::Entry, HashMap, HashSet},
+    ops::DerefMut,
     sync::{
         atomic::{AtomicBool, AtomicU32, Ordering},
         Arc, Weak,
@@ -139,52 +140,17 @@ struct AuthUserInfo {
     pub language: String,
 }
 
-async fn authenticate(id: Uuid, token: String) -> Result<AuthUserInfo> {
-    debug!("session {id}: authenticate {token}");
-    reqwest::Client::new()
-        .get(format!("{HOST}/me"))
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {token}"))
-        .send()
-        .await
-        .and_then(|r| r.error_for_status())
-        .with_context(|| "failed to fetch info")?
-        .json()
-        .await
-        .inspect_err(|e| warn!("failed to fetch info: {e:?}"))
-        .with_context(|| "failed to fetch info")
-
-    // let mut users_guard = server.users.write().await;
-    // if let Some(user) = users_guard.get(&resp.id) {
-    //     info!("reconnect");
-    //     let _ = tx.send(Arc::clone(user));
-    //     this_inited.notified().await;
-    //     user.set_session(Arc::downgrade(this.get().unwrap())).await;
-    // } else {
-    //     let user = Arc::new(User::new(
-    //         resp.id,
-    //         resp.name,
-    //         resp.language.parse().map(Language).unwrap_or_default(),
-    //         Arc::clone(&server),
-    //     ));
-    //     let _ = tx.send(Arc::clone(&user));
-    //     this_inited.notified().await;
-    //     user.set_session(Arc::downgrade(this.get().unwrap())).await;
-    //     users_guard.insert(resp.id, user);
-    // }
-}
-
 impl Session {
     pub async fn new(id: Uuid, stream: TcpStream, server: Arc<ServerState>) -> Result<Arc<Self>> {
         stream.set_nodelay(true)?;
         let this = Arc::new(OnceCell::<Arc<Session>>::new());
         let this_inited = Arc::new(Notify::new());
-        let (tx, rx) = oneshot::channel::<Option<Arc<User>>>();
+        let (tx, rx) = oneshot::channel::<Arc<User>>();
         let last_recv: Arc<Mutex<Instant>> = Arc::new(Mutex::new(Instant::now()));
         let stream = Stream::<ServerCommand, ClientCommand>::new(
             None,
             stream,
             Box::new({
-                let id = id.clone();
                 let this = Arc::clone(&this);
                 let this_inited = Arc::clone(&this_inited);
                 let mut tx = Some(tx);
@@ -193,147 +159,18 @@ impl Session {
                 let waiting_for_authenticate = Arc::new(AtomicBool::new(true));
                 let panicked = Arc::new(AtomicBool::new(false));
                 move |send_tx, cmd| {
-                    let this = Arc::clone(&this);
-                    let this_inited = Arc::clone(&this_inited);
-                    let tx = tx.take();
-                    let server = Arc::clone(&server);
-                    let last_recv = Arc::clone(&last_recv);
-                    let waiting_for_authenticate = Arc::clone(&waiting_for_authenticate);
-                    let panicked = Arc::clone(&panicked);
-                    async move {
-                        *last_recv.lock().await = Instant::now();
-                        if panicked.load(Ordering::SeqCst) {
-                            return;
-                        }
-                        if matches!(cmd, ClientCommand::Ping) {
-                            let _ = send_tx.send(ServerCommand::Pong).await;
-                            return;
-                        }
-                        if waiting_for_authenticate.load(Ordering::SeqCst) {
-                            if let ClientCommand::Authenticate { token } = cmd {
-                                // normal game client
-                                let Some(tx) = tx else { return };
-                                match authenticate(id.clone(), token.into_inner()).await {
-                                    Ok(resp) => {
-                                        let mut users_guard = server.users.write().await;
-                                        if let Some(user) = users_guard.get(&resp.id) {
-                                            info!("reconnect");
-                                            let _ = tx.send(Some(Arc::clone(user)));
-                                            this_inited.notified().await;
-                                            user.set_session(Arc::downgrade(this.get().unwrap()))
-                                                .await;
-                                        } else {
-                                            let user = Arc::new(User::new(
-                                                resp.id,
-                                                resp.name,
-                                                resp.language
-                                                    .parse()
-                                                    .map(Language)
-                                                    .unwrap_or_default(),
-                                                Arc::clone(&server),
-                                            ));
-                                            let _ = tx.send(Some(Arc::clone(&user)));
-                                            this_inited.notified().await;
-                                            user.set_session(Arc::downgrade(this.get().unwrap()))
-                                                .await;
-                                            users_guard.insert(resp.id, user);
-                                        }
-
-                                        let user = &this.get().unwrap().user;
-                                        let room_state = match user.room.read().await.as_ref() {
-                                            Some(room) => Some(room.client_state(user).await),
-                                            None => None,
-                                        };
-                                        let _ = send_tx
-                                            .send(ServerCommand::Authenticate(Ok((
-                                                user.to_info(),
-                                                room_state,
-                                            ))))
-                                            .await;
-                                        waiting_for_authenticate.store(false, Ordering::SeqCst);
-                                    }
-                                    Err(err) => {
-                                        warn!("failed to authenticate: {err:?}");
-                                        let _ = send_tx
-                                            .send(ServerCommand::Authenticate(Err(err.to_string())))
-                                            .await;
-                                        panicked.store(true, Ordering::SeqCst);
-                                        if let Err(err) = server.lost_con_tx.send(id).await {
-                                            error!(
-                                                "failed to mark lost connection ({id}): {err:?}"
-                                            );
-                                        }
-                                    }
-                                }
-                            } else if let ClientCommand::ConsoleAuthenticate { token } = cmd {
-                                // a server console client
-                                let Some(tx) = tx else { return };
-                                match authenticate(id.clone(), token.into_inner()).await {
-                                    Ok(resp) => {
-                                        let user = Arc::new(User::new(
-                                            resp.id,
-                                            resp.name,
-                                            resp.language.parse().map(Language).unwrap_or_default(),
-                                            Arc::clone(&server),
-                                        ));
-                                        let _ = tx.send(Some(Arc::clone(&user)));
-                                        this_inited.notified().await;
-                                        user.set_session(Arc::downgrade(this.get().unwrap())).await;
-
-                                        let _ = send_tx
-                                            .send(ServerCommand::Authenticate(Ok((
-                                                user.to_info(),
-                                                None,
-                                            ))))
-                                            .await;
-                                        waiting_for_authenticate.store(false, Ordering::SeqCst);
-                                    }
-                                    Err(err) => {
-                                        warn!("failed to authenticate: {err:?}");
-                                        let _ = send_tx
-                                            .send(ServerCommand::Authenticate(Err(err.to_string())))
-                                            .await;
-                                        panicked.store(true, Ordering::SeqCst);
-                                        if let Err(err) = server.lost_con_tx.send(id).await {
-                                            error!(
-                                                "failed to mark lost connection ({id}): {err:?}"
-                                            );
-                                        }
-                                    }
-                                }
-                            } else if let ClientCommand::QueryRooms { id: room_id } = cmd {
-                                // query rooms list, no auth required
-                                let Some(tx) = tx else { return };
-
-                                let rooms = query_rooms(&server, room_id).await;
-                                let _ = tx.send(None);
-                                let _ = send_tx.send(ServerCommand::ResponseRooms(rooms)).await;
-                                // one-shot connection, disconnect
-                                panicked.store(true, Ordering::SeqCst);
-                                if let Err(err) = server.lost_con_tx.send(id).await {
-                                    error!("failed to mark lost connection ({id}): {err:?}");
-                                }
-                            } else {
-                                warn!("packet before authentication, ignoring: {cmd:?}");
-                            }
-                            return;
-                        }
-                        let user = this.get().map(|it| Arc::clone(&it.user)).unwrap();
-                        if let Some(resp) = LANGUAGE
-                            .scope(Arc::new(user.lang.clone()), process(user, cmd))
-                            .await
-                        {
-                            if let Err(err) = send_tx.send(resp).await {
-                                error!(
-                                    "failed to handle message, aborting connection {id}: {err:?}",
-                                );
-                                panicked.store(true, Ordering::SeqCst);
-                                if let Err(err) = server.lost_con_tx.send(id).await {
-                                    error!("failed to mark lost connection ({id}): {err:?}");
-                                }
-                            }
-                        }
-                    }
+                    session_handler(
+                        id,
+                        Arc::clone(&this),
+                        Arc::clone(&this_inited),
+                        tx.take(),
+                        Arc::clone(&server),
+                        Arc::clone(&last_recv),
+                        Arc::clone(&waiting_for_authenticate),
+                        Arc::clone(&panicked),
+                        send_tx,
+                        cmd,
+                    )
                 }
             }),
         )
@@ -358,14 +195,7 @@ impl Session {
             }
         });
 
-        let user = rx.await?.unwrap_or_else(|| {
-            Arc::new(User::new(
-                -1,
-                "no_user".into(),
-                Language::default(),
-                Arc::clone(&server),
-            ))
-        });
+        let user = rx.await?;
         let res = Arc::new(Self {
             id,
             stream,
@@ -398,51 +228,182 @@ impl Drop for Session {
     }
 }
 
-async fn query_rooms(server: &ServerState, id: Option<RoomId>) -> String {
-    #[derive(Serialize)]
-    struct RoomData {
-        host: i32,
-        users: Vec<i32>,
-        lock: bool,
-        cycle: bool,
-        chart: Option<i32>,
-        state: &'static str,
-    }
-    #[derive(Serialize)]
-    struct RoomInfo {
-        name: String,
-        data: RoomData,
-    }
-    async fn to_data(room: &Room) -> RoomData {
-        RoomData {
-            host: room.host.read().await.upgrade().map_or(-1, |x| x.id),
-            users: room.users().await.iter().map(|x| x.id).collect(),
-            lock: room.is_locked(),
-            cycle: room.is_cycle(),
-            chart: room.chart.read().await.as_ref().map(|x| x.id),
-            state: match room.state.read().await.deref() {
-                InternalRoomState::Playing { .. } => "PLAYING",
-                InternalRoomState::SelectChart => "SELECTING_CHART",
-                InternalRoomState::WaitForReady { .. } => "WAITING_FOR_READY",
-            },
-        }
-    }
+async fn authenticate(id: Uuid, token: String) -> Result<AuthUserInfo> {
+    debug!("session {id}: authenticate {token}");
+    reqwest::Client::new()
+        .get(format!("{HOST}/me"))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {token}"))
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .with_context(|| "failed to fetch info")?
+        .json()
+        .await
+        .inspect_err(|e| warn!("failed to fetch info: {e:?}"))
+        .with_context(|| "failed to fetch info")
+}
 
-    if let Some(id) = id {
-        let room = match server.rooms.read().await.get(&id) {
-            Some(r) => Some(to_data(r.as_ref()).await),
-            None => None,
-        };
-        serde_json::to_string(&room).unwrap()
-    } else {
-        let mut rooms = Vec::new();
-        for (id, room) in server.rooms.read().await.iter() {
-            rooms.push(RoomInfo {
-                name: id.to_string(),
-                data: to_data(room.as_ref()).await,
-            });
+async fn session_handler(
+    id: Uuid,
+    this: Arc<OnceCell<Arc<Session>>>,
+    this_inited: Arc<Notify>,
+    tx: Option<oneshot::Sender<Arc<User>>>,
+    server: Arc<ServerState>,
+    last_recv: Arc<Mutex<Instant>>,
+    waiting_for_authenticate: Arc<AtomicBool>,
+    panicked: Arc<AtomicBool>,
+    send_tx: Arc<tokio::sync::mpsc::Sender<ServerCommand>>,
+    cmd: ClientCommand,
+) {
+    *last_recv.lock().await = Instant::now();
+    if panicked.load(Ordering::SeqCst) {
+        return;
+    }
+    if matches!(cmd, ClientCommand::Ping) {
+        let _ = send_tx.send(ServerCommand::Pong).await;
+        return;
+    }
+    if waiting_for_authenticate.load(Ordering::SeqCst) {
+        if let ClientCommand::Authenticate { token } = cmd {
+            // normal game client
+            let Some(tx) = tx else { return };
+            match authenticate(id.clone(), token.into_inner()).await {
+                Ok(resp) => {
+                    let mut users_guard = server.users.write().await;
+                    if let Some(user) = users_guard.get(&resp.id) {
+                        info!("reconnect");
+                        let _ = tx.send(Arc::clone(user));
+                        this_inited.notified().await;
+                        user.set_session(Arc::downgrade(this.get().unwrap())).await;
+                    } else {
+                        let user = Arc::new(User::new(
+                            resp.id,
+                            resp.name,
+                            resp.language.parse().map(Language).unwrap_or_default(),
+                            Arc::clone(&server),
+                        ));
+                        let _ = tx.send(Arc::clone(&user));
+                        this_inited.notified().await;
+                        user.set_session(Arc::downgrade(this.get().unwrap())).await;
+                        users_guard.insert(resp.id, user);
+                    }
+
+                    let user = &this.get().unwrap().user;
+                    let room_state = match user.room.read().await.as_ref() {
+                        Some(room) => Some(room.client_state(user).await),
+                        None => None,
+                    };
+                    let _ = send_tx
+                        .send(ServerCommand::Authenticate(Ok((
+                            user.to_info(),
+                            room_state,
+                        ))))
+                        .await;
+                    waiting_for_authenticate.store(false, Ordering::SeqCst);
+                }
+                Err(err) => {
+                    warn!("failed to authenticate: {err:?}");
+                    let _ = send_tx
+                        .send(ServerCommand::Authenticate(Err(err.to_string())))
+                        .await;
+                    panicked.store(true, Ordering::SeqCst);
+                    if let Err(err) = server.lost_con_tx.send(id).await {
+                        error!("failed to mark lost connection ({id}): {err:?}");
+                    }
+                }
+            }
+        } else if let ClientCommand::ConsoleAuthenticate { token } = cmd {
+            // a server console client
+            let Some(tx) = tx else { return };
+            match authenticate(id.clone(), token.into_inner()).await {
+                Ok(resp) => {
+                    let user = Arc::new(User::new(
+                        resp.id,
+                        resp.name,
+                        resp.language.parse().map(Language).unwrap_or_default(),
+                        Arc::clone(&server),
+                    ));
+                    let _ = tx.send(Arc::clone(&user));
+                    this_inited.notified().await;
+                    user.set_session(Arc::downgrade(this.get().unwrap())).await;
+
+                    let _ = send_tx
+                        .send(ServerCommand::Authenticate(Ok((user.to_info(), None))))
+                        .await;
+                    waiting_for_authenticate.store(false, Ordering::SeqCst);
+                }
+                Err(err) => {
+                    warn!("failed to authenticate: {err:?}");
+                    let _ = send_tx
+                        .send(ServerCommand::Authenticate(Err(err.to_string())))
+                        .await;
+                    panicked.store(true, Ordering::SeqCst);
+                    if let Err(err) = server.lost_con_tx.send(id).await {
+                        error!("failed to mark lost connection ({id}): {err:?}");
+                    }
+                }
+            }
+        } else if let ClientCommand::RoomMonitorAuthenticate { key } = cmd {
+            // a room monitor client
+            let Some(tx) = tx else { return };
+            let err = if let Some(p) = server.room_monitor.read().await.as_ref() {
+                if p.strong_count() > 0 {
+                    Some("more than one room monitor")
+                } else {
+                    *server.room_monitor.write().await = None;
+                    None
+                }
+            } else if generate_secret_key("room_monitor", 64).is_ok_and(|k| k == key) {
+                None
+            } else {
+                Some("secret key mismatch")
+            };
+            if let Some(str) = err {
+                warn!("authentication failed: {str}");
+                let _ = send_tx
+                    .send(ServerCommand::Authenticate(Err(str.into())))
+                    .await;
+                panicked.store(true, Ordering::SeqCst);
+                if let Err(err) = server.lost_con_tx.send(id).await {
+                    error!("failed to mark lost connection ({id}): {err:?}");
+                }
+            } else {
+                info!("new room monitor connected");
+                let user = Arc::new(User::new(
+                    -1,
+                    "$server_room_monitor".into(),
+                    Default::default(),
+                    Arc::clone(&server),
+                ));
+                let _ = send_tx
+                    .send(ServerCommand::Authenticate(Ok((user.to_info(), None))))
+                    .await;
+                let _ = tx.send(Arc::clone(&user));
+                this_inited.notified().await;
+
+                let weak_this = Arc::downgrade(this.get().unwrap());
+                user.set_session(Weak::clone(&weak_this)).await;
+                server.room_monitor.write().await.replace(weak_this);
+
+                waiting_for_authenticate.store(false, Ordering::SeqCst);
+            }
+        } else {
+            warn!("packet before authentication, ignoring: {cmd:?}");
         }
-        serde_json::to_string(&rooms).unwrap()
+        return;
+    }
+    let user = this.get().map(|it| Arc::clone(&it.user)).unwrap();
+    if let Some(resp) = LANGUAGE
+        .scope(Arc::new(user.lang.clone()), process(user, cmd))
+        .await
+    {
+        if let Err(err) = send_tx.send(resp).await {
+            error!("failed to handle message, aborting connection {id}: {err:?}",);
+            panicked.store(true, Ordering::SeqCst);
+            if let Err(err) = server.lost_con_tx.send(id).await {
+                error!("failed to mark lost connection ({id}): {err:?}");
+            }
+        }
     }
 }
 
@@ -484,11 +445,20 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
             }
         };
     }
+    macro_rules! send_room_event {
+        ($event:expr) => {
+            if let Some(p) = user.server.get_room_monitor().await {
+                p.try_send($event).await;
+            }
+        };
+    }
     match cmd {
         ClientCommand::Ping => unreachable!(),
-        ClientCommand::Authenticate { .. } | ClientCommand::ConsoleAuthenticate { .. } => Some(
-            ServerCommand::Authenticate(Err("repeated authenticate".to_owned())),
-        ),
+        ClientCommand::Authenticate { .. }
+        | ClientCommand::ConsoleAuthenticate { .. }
+        | ClientCommand::RoomMonitorAuthenticate { .. } => Some(ServerCommand::Authenticate(Err(
+            "repeated authenticate".to_owned(),
+        ))),
         ClientCommand::Chat { message } => {
             let res: Result<()> = async move {
                 get_room!(room);
@@ -562,8 +532,12 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                 }))
                 .await;
                 drop(map_guard);
-                *room_guard = Some(room);
 
+                send_room_event!(ServerCommand::CreateRoomEvent {
+                    room: id.clone(),
+                    data: room.into_json().await,
+                });
+                *room_guard = Some(room);
                 info!(user = user.id, room = id.to_string(), "user create room");
                 Ok(())
             }
@@ -609,6 +583,13 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                     name: user.name.clone(),
                 })
                 .await;
+
+                if !monitor {
+                    send_room_event!(ServerCommand::JoinRoomEvent {
+                        room: id.clone(),
+                        user: user.id,
+                    });
+                }
                 *room_guard = Some(Arc::clone(&room));
                 Ok(JoinRoomResponse {
                     state: room.client_room_state().await,
@@ -640,6 +621,11 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                 if room.on_user_leave(&user).await {
                     user.server.rooms.write().await.remove(&room.id);
                 }
+
+                send_room_event!(ServerCommand::LeaveRoomEvent {
+                    room: room.id.clone(),
+                    user: user.id,
+                });
                 Ok(())
             }
             .await;
@@ -657,6 +643,11 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                 );
                 room.locked.store(lock, Ordering::SeqCst);
                 room.send(Message::LockRoom { lock }).await;
+
+                send_room_event!(ServerCommand::UpdateRoomEvent {
+                    room: room.id.clone(),
+                    data: json!({"lock": lock}),
+                });
                 Ok(())
             }
             .await;
@@ -674,6 +665,11 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                 );
                 room.cycle.store(cycle, Ordering::SeqCst);
                 room.send(Message::CycleRoom { cycle }).await;
+
+                send_room_event!(ServerCommand::UpdateRoomEvent {
+                    room: room.id.clone(),
+                    data: json!({"cycle": cycle})
+                });
                 Ok(())
             }
             .await;
@@ -705,6 +701,11 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                     .await;
                     *room.chart.write().await = Some(res);
                     room.on_state_change().await;
+
+                    send_room_event!(ServerCommand::UpdateRoomEvent {
+                        room: room.id.clone(),
+                        data: json!({"chart": id})
+                    });
                     Ok(())
                 }
                 .instrument(span)
@@ -729,6 +730,15 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                 };
                 room.on_state_change().await;
                 room.check_all_ready().await;
+
+                let state_str = match *room.state.read().await {
+                    InternalRoomState::Playing { .. } => "PLAYING",
+                    _ => "WAITING_FOR_READY",
+                };
+                send_room_event!(ServerCommand::UpdateRoomEvent {
+                    room: room.id.clone(),
+                    data: json!({"state": state_str})
+                });
                 Ok(())
             }
             .await;
@@ -745,6 +755,16 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                     room.send(Message::Ready { user: user.id }).await;
                     drop(guard);
                     room.check_all_ready().await;
+
+                    if matches!(*room.state.read().await, InternalRoomState::Playing { .. }) {
+                        send_room_event!(ServerCommand::StartRoundEvent {
+                            room: room.id.clone()
+                        });
+                        send_room_event!(ServerCommand::UpdateRoomEvent {
+                            room: room.id.clone(),
+                            data: json!({"state": "PLAYING"})
+                        });
+                    }
                 }
                 Ok(())
             }
@@ -796,6 +816,10 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                     full_combo: res.full_combo,
                 })
                 .await;
+                send_room_event!(ServerCommand::PlayerScoreEvent {
+                    room: room.id.clone(),
+                    record: serde_json::to_value(&res).unwrap()
+                });
                 let mut guard = room.state.write().await;
                 if let InternalRoomState::Playing { results, aborted } = guard.deref_mut() {
                     if aborted.contains(&user.id) {
@@ -806,6 +830,16 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                     }
                     drop(guard);
                     room.check_all_ready().await;
+
+                    if matches!(
+                        *room.state.read().await,
+                        InternalRoomState::SelectChart { .. }
+                    ) {
+                        send_room_event!(ServerCommand::UpdateRoomEvent {
+                            room: room.id.clone(),
+                            data: json!({"state": "SELECTING_CHART"})
+                        });
+                    }
                 }
                 Ok(())
             }
@@ -826,14 +860,39 @@ async fn process(user: Arc<User>, cmd: ClientCommand) -> Option<ServerCommand> {
                     drop(guard);
                     room.send(Message::Abort { user: user.id }).await;
                     room.check_all_ready().await;
+
+                    if matches!(
+                        room.state.read().await.to_client(None),
+                        RoomState::SelectChart(_)
+                    ) {
+                        send_room_event!(ServerCommand::UpdateRoomEvent {
+                            room: room.id.clone(),
+                            data: json!({"state": "SELECTING_CHART"})
+                        });
+                    }
                 }
                 Ok(())
             }
             .await;
             Some(ServerCommand::Abort(err_to_str(res)))
         }
-        ClientCommand::QueryRooms { id } => Some(ServerCommand::ResponseRooms(
-            query_rooms(&user.server, id).await,
-        )),
+        ClientCommand::QueryRoomInfo => {
+            let res = async move {
+                if user.id != -1 {
+                    bail!("not a room monitor");
+                }
+                let mut info = HashMap::new();
+                let mut user_room_map = HashMap::new();
+                for (id, room) in user.server.rooms.read().await.iter() {
+                    for uid in room.users().await {
+                        user_room_map.insert(uid.id, id.clone());
+                    }
+                    info.insert(id.clone(), room.into_json().await);
+                }
+                Ok((info, user_room_map))
+            }
+            .await;
+            Some(ServerCommand::RoomResponse(err_to_str(res)))
+        }
     }
 }
