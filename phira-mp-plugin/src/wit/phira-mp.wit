@@ -1,0 +1,116 @@
+// Phira MP Plugin Interface
+// This WIT file defines the interface between plugins and the host
+
+package phira-mp:plugin-system
+
+world plugin {
+    // Import host functions that plugins can call
+    import host: interface {
+        // Logging
+        log-debug: func(message: string)
+        log-info: func(message: string)
+        log-warn: func(message: string)
+        log-error: func(message: string)
+        
+        // Event system
+        subscribe-event: func(event-type: string) -> result<_, string>
+        unsubscribe-event: func(event-type: string) -> result<_, string>
+        emit-event: func(event-type: string, data: string) -> result<_, string>
+        
+        // Command system
+        register-command: func(name: string, description: string) -> result<_, string>
+        unregister-command: func(name: string) -> result<_, string>
+        
+        // User management APIs
+        kick-user: func(user-id: u32) -> result<_, string>
+        ban-user-by-id: func(user-id: u32, reason: string) -> result<_, string>
+        unban-user-by-id: func(user-id: u32) -> result<_, string>
+        ban-user-by-ip: func(ip: string, reason: string) -> result<_, string>
+        unban-user-by-ip: func(ip: string) -> result<_, string>
+        get-user-info: func(user-id: u32) -> result<string, string>
+        get-username: func(user-id: u32) -> result<string, string>
+        get-user-language: func(user-id: u32) -> result<string, string>
+        get-user-playtime: func(user-id: u32) -> result<u64, string>
+        get-playtime-leaderboard: func(limit: u32) -> result<string, string>
+        get-playtime-total-leaderboard: func() -> result<string, string>
+        get-banned-users-by-id: func() -> result<string, string>
+        get-banned-users-by-ip: func() -> result<string, string>
+        is-user-banned-by-id: func(user-id: u32) -> result<bool, string>
+        is-user-banned-by-ip: func(ip: string) -> result<bool, string>
+        ban-user-from-room-by-id: func(user-id: u32, room-id: u32) -> result<_, string>
+        unban-user-from-room-by-id: func(user-id: u32, room-id: u32) -> result<_, string>
+        ban-user-from-room-by-ip: func(ip: string, room-id: u32) -> result<_, string>
+        unban-user-from-room-by-ip: func(ip: string, room-id: u32) -> result<_, string>
+        is-user-banned-from-room: func(user-id: u32, room-id: u32) -> result<bool, string>
+        
+        // Room management APIs
+        create-room: func(max-users: u32) -> result<u32, string>
+        disband-room: func(room-id: u32) -> result<_, string>
+        add-user-to-room: func(user-id: u32, room-id: u32) -> result<_, string>
+        kick-user-from-room: func(user-id: u32, room-id: u32) -> result<_, string>
+        get-room-info: func(room-id: u32) -> result<string, string>
+        get-room-user-count: func(room-id: u32) -> result<u32, string>
+        get-room-user-ids: func(room-id: u32) -> result<string, string>
+        get-room-host-id: func(room-id: u32) -> result<u32, string>
+        set-room-max-users: func(room-id: u32, max-users: u32) -> result<_, string>
+        start-room-preparation: func(room-id: u32) -> result<_, string>
+        end-room-preparation: func(room-id: u32) -> result<_, string>
+        force-start-room-game: func(room-id: u32) -> result<_, string>
+        set-room-lock: func(room-id: u32, locked: bool) -> result<_, string>
+        switch-room-to-normal-mode: func(room-id: u32) -> result<_, string>
+        switch-room-to-cycle-mode: func(room-id: u32) -> result<_, string>
+        select-room-chart: func(room-id: u32, chart-id: u32) -> result<_, string>
+        
+        // Messaging APIs
+        send-message-to-user: func(user-id: u32, message: string) -> result<_, string>
+        broadcast-message-to-all: func(message: string) -> result<_, string>
+        broadcast-message-to-room: func(room-id: u32, message: string) -> result<_, string>
+        broadcast-message-to-all-rooms: func(message: string) -> result<_, string>
+        
+        // Server management APIs
+        shutdown-server: func() -> result<_, string>
+        restart-server: func() -> result<_, string>
+        reload-all-plugins: func() -> result<_, string>
+        reload-plugin: func(name: string) -> result<_, string>
+        get-plugin-list: func() -> result<string, string>
+        get-online-user-count: func() -> result<u32, string>
+        get-available-room-count: func() -> result<u32, string>
+        get-room-list: func() -> result<string, string>
+        get-available-room-list: func() -> result<string, string>
+        get-online-user-ids: func() -> result<string, string>
+        
+        // HTTP and command registration APIs
+        register-http-route: func(method: string, path: string) -> result<_, string>
+        register-command: func(name: string, description: string) -> result<_, string>
+        register-room-info-field: func(name: string, type: string) -> result<_, string>
+        register-user-info-field: func(name: string, type: string) -> result<_, string>
+        
+        // Configuration APIs
+        get-config: func(key: string) -> result<string, string>
+        set-config: func(key: string, value: string) -> result<_, string>
+        save-config: func() -> result<_, string>
+        
+        // Memory and resource management
+        allocate-memory: func(size: u32) -> result<u32, string>
+        free-memory: func(ptr: u32) -> result<_, string>
+        read-memory: func(ptr: u32, size: u32) -> result<string, string>
+        write-memory: func(ptr: u32, data: string) -> result<_, string>
+    }
+    
+    // Export plugin functions that the host can call
+    export plugin: interface {
+        // Lifecycle functions
+        init: func() -> result<_, string>
+        start: func() -> result<_, string>
+        stop: func() -> result<_, string>
+        
+        // Event handlers
+        on-event: func(event-type: string, data: string) -> result<_, string>
+        
+        // Command handlers
+        on-command: func(command: string, args: string) -> result<string, string>
+        
+        // HTTP request handlers (if registered)
+        on-http-request: func(method: string, path: string, body: string) -> result<string, string>
+    }
+}

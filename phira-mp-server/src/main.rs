@@ -1,3 +1,4 @@
+mod cli;
 mod l10n;
 
 mod room;
@@ -20,7 +21,7 @@ use std::{
     path::Path,
 };
 use tokio::{net::TcpListener, sync::RwLock};
-use tracing::warn;
+use tracing::{info, warn};
 use tracing_appender::non_blocking::WorkerGuard;
 use uuid::Uuid;
 
@@ -92,6 +93,32 @@ struct Args {
         help = "Specify the port number to use for the server"
     )]
     port: u16,
+    
+    #[clap(
+        short,
+        long,
+        default_value = "plugins",
+        help = "Plugin directory path"
+    )]
+    plugin_dir: String,
+    
+    #[clap(
+        long,
+        help = "Run in CLI mode (execute commands instead of starting server)"
+    )]
+    cli: bool,
+    
+    #[clap(
+        long,
+        help = "Execute a single command and exit"
+    )]
+    command: Option<String>,
+    
+    #[clap(
+        help = "Command arguments (used with --command)",
+        last = true
+    )]
+    command_args: Vec<String>,
 }
 
 #[tokio::main]
@@ -99,6 +126,62 @@ async fn main() -> Result<()> {
     let _guard = init_log("phira-mp")?;
 
     let args = Args::parse();
+
+    // Handle CLI mode
+    if args.cli || args.command.is_some() {
+        return run_cli_mode(args).await;
+    }
+
+    // Original server mode
+    run_server_mode(args).await
+}
+
+/// Run in CLI mode (execute commands)
+async fn run_cli_mode(args: Args) -> Result<()> {
+    use cli::CliHandler;
+    
+    info!("Starting CLI mode with plugin directory: {}", args.plugin_dir);
+    
+    // Create CLI handler
+    let cli_handler = match CliHandler::new(&args.plugin_dir).await {
+        Ok(handler) => handler,
+        Err(e) => {
+            eprintln!("Failed to initialize CLI handler: {}", e);
+            eprintln!("Note: This may be due to circular dependencies in the current implementation.");
+            eprintln!("Trying to continue with limited functionality...");
+            return Ok(());
+        }
+    };
+
+    // Initialize plugins
+    if let Err(e) = cli_handler.initialize_plugins().await {
+        eprintln!("Warning: Failed to initialize plugins: {}", e);
+    }
+
+    // Execute command if provided
+    if let Some(command) = args.command {
+        let all_args: Vec<String> = std::iter::once(command)
+            .chain(args.command_args.into_iter())
+            .collect();
+        
+        match cli_handler.execute_from_args(all_args).await {
+            Ok(result) => {
+                println!("{}", result);
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                Ok(())
+            }
+        }
+    } else {
+        // Interactive mode
+        cli_handler.start_interactive().await
+    }
+}
+
+/// Run in server mode
+async fn run_server_mode(args: Args) -> Result<()> {
     let port = args.port;
     let addrs: &[SocketAddr] = &[SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), port)];
 

@@ -8,6 +8,8 @@ members = [
     "phira-mp-client",
     "phira-mp-macros",
     "phira-mp-server",
+    "phira-mp-plugin",
+    "phira-mp-plugin-macros",
 ]
 resolver = "2"
 
